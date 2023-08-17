@@ -1,0 +1,90 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "userAssignedIdentity": { "type": "string" },
+    "managedIdentityClientId": { "type": "string" },
+    "mysqlServerName": { "type": "string" },
+    "mysqlDatabaseName": { "type": "string" },
+    "webAppName": { "type": "string" },
+    "dockerImage": { "type": "string" }
+  },
+  "variables": {
+    "appServicePlanName": "[concat(parameters('webAppName'), '-plan')]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2022-09-01",
+      "name": "[variables('appServicePlanName')]",
+      "location": "[resourceGroup().location]",
+      "kind": "Linux",
+      "properties": {
+        "reserved": true
+      },
+      "sku": { "name": "B1" }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2022-09-01",
+      "name": "[parameters('webAppName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]"
+      ],
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[parameters('userAssignedIdentity')]": {}
+        }
+      },
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "httpsOnly": true,
+        "clientAffinityEnabled": false,
+        "siteConfig": {
+          "linuxFxVersion": "[concat('DOCKER|', parameters('dockerImage'))]",
+          "appSettings": [
+            {
+              "name": "AZURE_CLIENT_ID",
+              "value": "[parameters('managedIdentityClientId')]"
+            },
+            {
+              "name": "MYSQL_DATABASE_NAME",
+              "value": "[parameters('mysqlDatabaseName')]"
+            },
+            {
+              "name": "MYSQL_SERVER_NAME",
+              "value": "[parameters('mysqlServerName')]"
+            },
+            {
+              "name": "SQL_DIALECT",
+              "value": "mysql"
+            },
+            {
+              "name": "WEBSITES_ENABLE_APP_SERVICE_STORAGE",
+              "value": "false"
+            },
+            {
+              "name": "WEBSITES_PORT",
+              "value": "9001"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2022-09-01",
+      "name": "[concat(parameters('webAppName'), '/web')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ],
+      "properties": {
+        "acrUseManagedIdentityCreds": true,
+        "acrUserManagedIdentityID": "[parameters('managedIdentityClientId')]"
+      }
+    }
+  ]
+}

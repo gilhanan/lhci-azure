@@ -1,0 +1,159 @@
+name: CICD
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  LOCATION: "East US"
+
+jobs:
+  CICD:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Metadata
+        id: metadata
+        run: |
+          app_name=${{ secrets.APP_NAME }}
+          server_app_name=$app_name-server
+          alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
+          registry_name=$alphabet_app_name
+          registry_server=$registry_name.azurecr.io
+          full_image_name=lhci/server:${{ github.sha }}
+          echo "client_id=${{ secrets.AZURE_CLIENT_ID }}" >> $GITHUB_OUTPUT
+          echo "tenant_id=${{ secrets.AZURE_TENANT_ID }}" >> $GITHUB_OUTPUT
+          echo "subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" >> $GITHUB_OUTPUT
+          echo "resource_group=$app_name" >> $GITHUB_OUTPUT
+          echo "keyvault_name=$app_name-keyvault" >> $GITHUB_OUTPUT
+          echo "registry_name=$registry_name" >> $GITHUB_OUTPUT
+          echo "registry_server=$registry_server" >> $GITHUB_OUTPUT
+          echo "full_image_name=$full_image_name" >> $GITHUB_OUTPUT
+          echo "full_image_name_url=$registry_server/$full_image_name" >> $GITHUB_OUTPUT
+          echo "mysql_server_name=$server_app_name-db" >> $GITHUB_OUTPUT
+          echo "webapp_name=$server_app_name-app" >> $GITHUB_OUTPUT
+          echo "identity_name=$server_app_name-identity" >> $GITHUB_OUTPUT
+          echo "database_name=lhci-data" >> $GITHUB_OUTPUT
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ steps.metadata.outputs.client_id }}
+          tenant-id: ${{ steps.metadata.outputs.tenant_id }}
+          subscription-id: ${{ steps.metadata.outputs.subscription_id }}
+
+      - name: AAD Application display name
+        id: aad_app_display_name
+        run: |
+          app_name=$(az ad app show --id ${{ steps.metadata.outputs.client_id }} --query "displayName" -o tsv)
+          echo "value=$app_name" >> $GITHUB_OUTPUT
+
+      - name: Create Resource Group
+        run: az group create --name ${{ steps.metadata.outputs.resource_group }} --location "${{ env.LOCATION }}"
+
+      - name: Default Resource Group
+        run: az config set defaults.group=${{ steps.metadata.outputs.resource_group }}
+
+      - name: Create Azure Key Vault
+        run: |
+          exists=$(az keyvault show --name ${{ steps.metadata.outputs.keyvault_name }} --query name -o tsv | wc -l)
+          if [ $exists -eq 0 ]; then
+            az keyvault create --name ${{ steps.metadata.outputs.keyvault_name }} --enable-rbac-authorization true
+          fi
+
+      - name: Create ACR
+        run: az acr create -n ${{ steps.metadata.outputs.registry_name }} --sku Basic --admin-enabled true
+
+      - name: Create User-assigned Managed Identity
+        run: az identity create --name ${{ steps.metadata.outputs.identity_name }}
+
+      - name: Login to ACR
+        run: az acr login -n ${{ steps.metadata.outputs.registry_name }}
+
+      - name: Build and Push Docker image to ACR
+        run: az acr build -r ${{ steps.metadata.outputs.registry_name }} -t ${{ steps.metadata.outputs.full_image_name }} .
+
+      - name: Retrieve the Managed Identity IDs
+        id: identity
+        run: |
+          identity_output=$(az identity show --name ${{ steps.metadata.outputs.identity_name }} -o json)
+          echo "principal_id=$(echo $identity_output | jq -r '.principalId')" >> $GITHUB_OUTPUT
+          echo "client_id=$(echo $identity_output | jq -r '.clientId')" >> $GITHUB_OUTPUT
+          echo "resource_id=$(echo $identity_output | jq -r '.id')" >> $GITHUB_OUTPUT
+
+      - name: Grant the Managed Identity permission to Read from Key Vault
+        run: |
+          az role assignment create \
+          --assignee ${{ steps.identity.outputs.principal_id }} \
+          --scope $(az keyvault show --name ${{ steps.metadata.outputs.keyvault_name }} --query id --output tsv) \
+          --role "Key Vault Secrets User"
+
+      - name: Grant the Managed Identity permission to Pull from ACR
+        run: |
+          az role assignment create \
+          --assignee ${{ steps.identity.outputs.principal_id }} \
+          --scope $(az acr show --name ${{ steps.metadata.outputs.registry_name }} --query id --output tsv) \
+          --role "AcrPull"
+
+      - name: Generate MySQL Admin Credentials
+        id: mysql_admin_credentials
+        run: |
+          user=$(shuf -zer -n8 {A..Z} {a..z})
+          password=$(shuf -zer -n32 {A..Z} {a..z} {0..9})
+          echo "user=$user" >> $GITHUB_OUTPUT
+          echo "password=$password" >> $GITHUB_OUTPUT
+          echo "::add-mask::$user"
+          echo "::add-mask::$password"
+
+      - name: Deploy Database
+        uses: azure/arm-deploy@v1
+        with:
+          scope: resourcegroup
+          resourceGroupName: ${{ steps.metadata.outputs.resource_group }}
+          template: ./templates/db.json
+          parameters: >
+            mysqlServerName=${{ steps.metadata.outputs.mysql_server_name }} 
+            mysqlDatabaseName=${{ steps.metadata.outputs.database_name }}
+            userAssignedIdentity=${{ steps.identity.outputs.resource_id }}
+            tenantId=${{ steps.metadata.outputs.tenant_id }}
+            aadAdministratorLogin=${{ steps.aad_app_display_name.outputs.value }}
+            aadAdministratorSID=${{ steps.metadata.outputs.client_id }}
+            administratorLogin=${{ steps.mysql_admin_credentials.outputs.user }} 
+            administratorLoginPassword="${{ steps.mysql_admin_credentials.outputs.password }}"
+
+      - name: Create MySQL User
+        run: |
+          password=$(az account get-access-token --resource https://ossrdbms-aad.database.windows.net --query accessToken -o tsv)
+          mysql --host=${{ steps.metadata.outputs.mysql_server_name }}.mysql.database.azure.com --user=${{ steps.aad_app_display_name.outputs.value }} --password=$password --enable-cleartext-plugin << EOF
+          SET aad_auth_validate_oids_in_tenant = OFF;
+          DROP USER IF EXISTS 'lhci'@'%';
+          CREATE AADUSER 'lhci' IDENTIFIED BY '${{ steps.identity.outputs.client_id }}';
+          GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER ON *.* TO 'lhci'@'%' WITH GRANT OPTION;
+          FLUSH PRIVILEGES;
+          EOF
+
+      - name: Deploy WebApp
+        uses: azure/arm-deploy@v1
+        with:
+          scope: resourcegroup
+          resourceGroupName: ${{ steps.metadata.outputs.resource_group }}
+          template: ./templates/webapp.json
+          parameters: >
+            userAssignedIdentity=${{ steps.identity.outputs.resource_id }}
+            managedIdentityClientId=${{ steps.identity.outputs.client_id }}
+            mysqlServerName=${{ steps.metadata.outputs.mysql_server_name }} 
+            mysqlDatabaseName=${{ steps.metadata.outputs.database_name }}
+            webAppName=${{ steps.metadata.outputs.webapp_name }}
+            dockerImage=${{  steps.metadata.outputs.full_image_name_url }}
