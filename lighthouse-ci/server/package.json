@@ -1,0 +1,17 @@
+{
+  "name": "lhci-server",
+  "version": "0.0.0",
+  "license": "MIT",
+  "main": "server.js",
+  "module": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@azure/identity": "^3.3.0",
+    "@lhci/cli": "^0.13.0",
+    "@lhci/server": "^0.13.0",
+    "jwt-decode": "^4.0.0",
+    "mysql2": "^3.9.0"
+  }
+}

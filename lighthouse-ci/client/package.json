@@ -1,0 +1,11 @@
+{
+  "name": "lhci-client",
+  "version": "0.0.0",
+  "license": "MIT",
+  "scripts": {
+    "start": "lhci autorun"
+  },
+  "dependencies": {
+    "@lhci/cli": "^0.13.0"
+  }
+}

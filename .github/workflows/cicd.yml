@@ -1,0 +1,562 @@
+name: CICD
+
+concurrency:
+  group: ${{ github.workflow }}
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  LOCATION: "North Europe"
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      app_name: ${{ steps.metadata.outputs.app_name }}
+      resource_group: ${{ steps.metadata.outputs.resource_group }}
+      registry_name: ${{ steps.metadata.outputs.registry_name }}
+      registry_host: ${{ steps.metadata.outputs.registry_host }}
+      keyvault_name: ${{ steps.metadata.outputs.keyvault_name }}
+      demo_app_name: ${{ steps.metadata.outputs.demo_app_name }}
+      demo_app_identity_name: ${{ steps.metadata.outputs.demo_app_identity_name }}
+      demo_app_image_name: ${{ steps.metadata.outputs.demo_app_image_name }}
+      lhci_server_name: ${{ steps.metadata.outputs.lhci_server_name }}
+      lhci_server_identity_name: ${{ steps.metadata.outputs.lhci_server_identity_name }}
+      lhci_server_image_name: ${{ steps.metadata.outputs.lhci_server_image_name }}
+      mysql_server_name: ${{ steps.metadata.outputs.mysql_server_name }}
+      mysql_database_name: ${{ steps.metadata.outputs.mysql_database_name }}
+      lhci_client_name: ${{ steps.metadata.outputs.lhci_client_name }}
+      lhci_client_identity_name: ${{ steps.metadata.outputs.lhci_client_identity_name }}
+      lhci_client_image_name: ${{ steps.metadata.outputs.lhci_client_image_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Metadata
+        id: metadata
+        run: |
+          app_name=${{ vars.APP_NAME }}
+          alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
+          registry_name=$alphabet_app_name
+          demo_app_name=$app_name-demo-app
+          lhci_server_name=$app_name-lhci-server
+          lhci_client_name=$app_name-lhci-client
+          short_commit=$(git rev-parse --short HEAD)
+          echo "app_name=$app_name" >> $GITHUB_OUTPUT
+          echo "resource_group=$app_name" >> $GITHUB_OUTPUT
+          echo "registry_name=$registry_name" >> $GITHUB_OUTPUT
+          echo "registry_host=$registry_name.azurecr.io" >> $GITHUB_OUTPUT
+          echo "keyvault_name=$app_name-keyvault" >> $GITHUB_OUTPUT
+          echo "demo_app_name=$demo_app_name" >> $GITHUB_OUTPUT
+          echo "demo_app_identity_name=$demo_app_name-identity" >> $GITHUB_OUTPUT
+          echo "demo_app_image_name=demo-app:$short_commit" >> $GITHUB_OUTPUT
+          echo "lhci_server_name=$lhci_server_name" >> $GITHUB_OUTPUT
+          echo "lhci_server_identity_name=$lhci_server_name-identity" >> $GITHUB_OUTPUT
+          echo "lhci_server_image_name=lhci/server:$short_commit" >> $GITHUB_OUTPUT
+          echo "mysql_server_name=$lhci_server_name-db" >> $GITHUB_OUTPUT
+          echo "mysql_database_name=lhci-data" >> $GITHUB_OUTPUT
+          echo "lhci_client_name=$lhci_client_name" >> $GITHUB_OUTPUT
+          echo "lhci_client_identity_name=$lhci_client_name-identity" >> $GITHUB_OUTPUT
+          echo "lhci_client_image_name=lhci/client:$short_commit" >> $GITHUB_OUTPUT
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create Resource Group
+        run: |
+          az group create \
+          --name ${{ steps.metadata.outputs.resource_group }} \
+          --location "${{ env.LOCATION }}"
+
+      - name: Default Resource Group
+        run: az config set defaults.group=${{ steps.metadata.outputs.resource_group }}
+
+      - name: Create Azure Key Vault
+        id: keyvault
+        run: |
+          id=$(az keyvault list --query "[?name=='${{ steps.metadata.outputs.keyvault_name }}'].id" --output tsv)
+          if [ -z "$id" ]; then
+            az keyvault create \
+              --name ${{ steps.metadata.outputs.keyvault_name }} \
+              --enable-rbac-authorization true
+            id=$(az keyvault show --name ${{ steps.metadata.outputs.keyvault_name }} --query id --output tsv)
+          fi
+          echo "id=$id" >> $GITHUB_OUTPUT
+
+      - name: Assign Key Vault Secrets Officer role to the AAD Application
+        run: |
+          az role assignment create \
+          --assignee ${{ secrets.AZURE_CLIENT_ID }} \
+          --scope ${{ steps.keyvault.outputs.id }} \
+          --role "Key Vault Secrets Officer"
+
+      - name: Create ACR
+        run: |
+          az acr create \
+          --name ${{ steps.metadata.outputs.registry_name }} \
+          --sku Basic \
+          --admin-enabled true
+
+  deploy-lighthouse-db:
+    runs-on: ubuntu-latest
+    needs: [setup]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Default Resource Group
+        run: az config set defaults.group=${{ needs.setup.outputs.resource_group }}
+
+      - name: Create User-assigned Managed Identity
+        run: az identity create -n ${{ needs.setup.outputs.lhci_server_identity_name }}
+
+      - name: Retrieve the Managed Identity ID
+        id: identity
+        run: |
+          identity=$(az identity show \
+          --name ${{ needs.setup.outputs.lhci_server_identity_name }} \
+          --output json)
+          echo "principal_id=$(echo $identity | jq -r '.principalId')" >> $GITHUB_OUTPUT
+          echo "client_id=$(echo $identity | jq -r '.clientId')" >> $GITHUB_OUTPUT
+          echo "resource_id=$(echo $identity | jq -r '.id')" >> $GITHUB_OUTPUT
+
+      - name: Deploy Database
+        run: |
+          az deployment group create \
+          --template-file ./lighthouse-ci/server/deployment/mysql.bicep \
+          --parameters \
+            tenantId=${{ secrets.AZURE_TENANT_ID }} \
+            userAssignedIdentity=${{ steps.identity.outputs.resource_id }} \
+            mysqlServerName=${{ needs.setup.outputs.mysql_server_name }}  \
+            mysqlDatabaseName=${{ needs.setup.outputs.mysql_database_name }} \
+            administratorLogin=$(shuf -zer -n8 {A..Z} {a..z})  \
+            administratorLoginPassword=$(shuf -zer -n32 {A..Z} {a..z} {0..9}) \
+            aadAdministratorLogin=${{ needs.setup.outputs.lhci_server_identity_name }} \
+            aadAdministratorSID=${{ steps.identity.outputs.principal_id }}
+
+  build-lighthouse-server:
+    needs: [setup]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ needs.setup.outputs.registry_name }}
+
+      - name: Build and Push Docker image to ACR
+        run: |
+          az acr build \
+          --registry ${{ needs.setup.outputs.registry_name }} \
+          --image ${{ needs.setup.outputs.lhci_server_image_name }} \
+          ./lighthouse-ci/server
+
+  deploy-lighthouse-server:
+    runs-on: ubuntu-latest
+    needs: [setup, build-lighthouse-server, deploy-lighthouse-db]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Default Resource Group
+        run: az config set defaults.group=${{ needs.setup.outputs.resource_group }}
+
+      - name: Create User-assigned Managed Identity
+        run: az identity create -n ${{ needs.setup.outputs.lhci_server_identity_name }}
+
+      - name: Retrieve the Managed Identity ID
+        id: identity
+        run: |
+          identity=$(az identity show \
+          --name ${{ needs.setup.outputs.lhci_server_identity_name }} \
+          --output json)
+          echo "principal_id=$(echo $identity | jq -r '.principalId')" >> $GITHUB_OUTPUT
+          echo "client_id=$(echo $identity | jq -r '.clientId')" >> $GITHUB_OUTPUT
+          echo "resource_id=$(echo $identity | jq -r '.id')" >> $GITHUB_OUTPUT
+
+      - name: Grant the Managed Identity permission to Pull from ACR
+        run: |
+          az role assignment create \
+          --assignee ${{ steps.identity.outputs.principal_id }} \
+          --scope $(az acr show -n ${{ needs.setup.outputs.registry_name }} --query id --output tsv) \
+          --role "AcrPull"
+
+      - name: Deploy Container App
+        run: |
+          az deployment group create \
+          --template-file ./lighthouse-ci/server/deployment/container-app.bicep \
+          --parameters \
+            userAssignedIdentity=${{ steps.identity.outputs.resource_id }} \
+            managedIdentityClientId=${{ steps.identity.outputs.client_id }} \
+            containerAppName=${{ needs.setup.outputs.lhci_server_name }} \
+            registryHost=${{ needs.setup.outputs.registry_host }} \
+            imageName=${{ needs.setup.outputs.lhci_server_image_name }} \
+            mysqlServerName=${{ needs.setup.outputs.mysql_server_name }} \
+            mysqlDatabaseName=${{ needs.setup.outputs.mysql_database_name }} \
+            mysqlUser=${{ needs.setup.outputs.lhci_server_identity_name }}
+
+      - name: Wait for Container to be Succeeded
+        run: |
+          echo "Waiting for container to be provisioned."
+          while true; do
+            status=$(az containerapp show \
+              --name ${{ needs.setup.outputs.lhci_server_name }} \
+              --query properties.provisioningState \
+              --output tsv)
+            if [ "$status" != "InProgress" ]; then
+              break
+            fi
+            sleep 5
+          done
+          echo "Container provisioning is completed. Current status: $status"
+          if [ "$status" != "Succeeded" ]; then
+            exit 1
+          fi
+
+  create-lighthouse-project:
+    needs: [setup, deploy-lighthouse-server]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Default Resource Group
+        run: az config set defaults.group=${{ needs.setup.outputs.resource_group }}
+
+      - name: Get Lighthouse CI Server Host
+        id: lhci_server
+        run: |
+          echo "host=$(az containerapp show \
+          --name ${{ needs.setup.outputs.lhci_server_name }} \
+          --query properties.configuration.ingress.fqdn \
+          --output tsv)" >> $GITHUB_OUTPUT
+
+      - name: Create Lighthouse CI Project
+        id: create_lhci_project
+        env:
+          LHCI_HOST: ${{ steps.lhci_server.outputs.host }}
+          NAME: ${{ needs.setup.outputs.app_name }}
+          REPO_URL: ${{ github.event.repository.html_url }}
+          BASE_BRANCH: ${{ github.event.repository.master_branch }}
+          SLUG: ${{ github.event.repository.full_name }}
+        run: |
+          response=$(bash ./lighthouse-ci/server/deployment/create_lhci_project.sh)
+          token=$(echo $response | jq -r '.token // empty')
+          adminToken=$(echo $response | jq -r '.adminToken // empty')
+          echo "::add-mask::$token"
+          echo "::add-mask::$adminToken"
+          echo "token=$token" >> $GITHUB_OUTPUT
+          echo "adminToken=$adminToken" >> $GITHUB_OUTPUT
+
+      - name: Create token and adminToken as Azure Key Vault Secrets if not nulls
+        run: |
+          if [ -n "${{ steps.create_lhci_project.outputs.token }}" ]; then
+            az keyvault secret set \
+            --vault-name ${{ needs.setup.outputs.keyvault_name }} \
+            --name "LHCI-TOKEN" \
+            --value "${{ steps.create_lhci_project.outputs.token }}"
+          fi
+
+          if [ -n "${{ steps.create_lhci_project.outputs.adminToken }}" ]; then
+            az keyvault secret set \
+            --vault-name ${{ needs.setup.outputs.keyvault_name }} \
+            --name "LHCI-ADMIN-TOKEN" \
+            --value "${{ steps.create_lhci_project.outputs.adminToken }}"
+          fi
+
+  build-demo-app:
+    needs: [setup]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ needs.setup.outputs.registry_name }}
+
+      - name: Build and Push Docker image to ACR
+        run: |
+          az acr build \
+          --registry ${{ needs.setup.outputs.registry_name }} \
+          --image ${{ needs.setup.outputs.demo_app_image_name }} \
+          ./demo-app
+
+  deploy-demo-app-staging:
+    runs-on: ubuntu-latest
+    needs: [setup, build-demo-app]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Default Resource Group
+        run: az config set defaults.group=${{ needs.setup.outputs.resource_group }}
+
+      - name: Create User-assigned Managed Identity
+        run: az identity create --name ${{ needs.setup.outputs.demo_app_identity_name }}
+
+      - name: Retrieve the Managed Identity IDs
+        id: identity
+        run: |
+          identity=$(az identity show \
+            --name ${{ needs.setup.outputs.demo_app_identity_name }} \
+            --output json)
+
+          echo "principal_id=$(echo $identity | jq -r '.principalId')" >> $GITHUB_OUTPUT
+          echo "client_id=$(echo $identity | jq -r '.clientId')" >> $GITHUB_OUTPUT
+          echo "resource_id=$(echo $identity | jq -r '.id')" >> $GITHUB_OUTPUT
+
+      - name: Grant the Managed Identity permission to Pull from ACR
+        run: |
+          scope=$(az acr show \
+          --name ${{ needs.setup.outputs.registry_name }} \
+          --query id \
+          --output tsv)
+
+          az role assignment create \
+          --assignee ${{ steps.identity.outputs.principal_id }} \
+          --scope $scope \
+          --role "AcrPull"
+
+      - name: Get production revision id
+        id: production_revision
+        env:
+          RESOURCE_GROUP_NAME: ${{ needs.setup.outputs.resource_group }}
+          CONTAINER_APP_NAME: ${{ needs.setup.outputs.demo_app_name }}
+        run: echo "production_revision=$(bash ./demo-app/deployment/get_production_revision.sh)" >> $GITHUB_OUTPUT
+
+      - name: Deploy Container App
+        run: |
+          az deployment group create \
+          --template-file ./demo-app/deployment/container-app.bicep \
+          --parameters \
+            userAssignedIdentity=${{ steps.identity.outputs.resource_id }} \
+            containerAppName=${{ needs.setup.outputs.demo_app_name }} \
+            registryHost=${{ needs.setup.outputs.registry_host }} \
+            imageName=${{ needs.setup.outputs.demo_app_image_name }} \
+            productionRevision=${{ steps.production_revision.outputs.production_revision }}
+
+      - name: Set staging label to latest revision
+        env:
+          RESOURCE_GROUP_NAME: ${{ needs.setup.outputs.resource_group }}
+          CONTAINER_APP_NAME: ${{ needs.setup.outputs.demo_app_name }}
+        run: bash ./demo-app/deployment/set_staging_label.sh
+
+  build-lighthouse-client:
+    needs: [setup]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ needs.setup.outputs.registry_name }}
+
+      - name: Build and Push Docker image to ACR
+        run: |
+          az acr build \
+          --registry ${{ needs.setup.outputs.registry_name }} \
+          --image ${{ needs.setup.outputs.lhci_client_image_name }} \
+          ./lighthouse-ci/client
+
+  deploy-lighthouse-client:
+    runs-on: ubuntu-latest
+    needs:
+      [
+        setup,
+        build-lighthouse-client,
+        create-lighthouse-project,
+        deploy-demo-app-staging,
+      ]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Default Resource Group
+        run: az config set defaults.group=${{ needs.setup.outputs.resource_group }}
+
+      - name: Create User-assigned Managed Identity
+        run: az identity create -n ${{ needs.setup.outputs.lhci_client_identity_name }}
+
+      - name: Retrieve the Managed Identity ID
+        id: identity
+        run: |
+          identity=$(az identity show \
+            --name ${{ needs.setup.outputs.lhci_client_identity_name }} \
+            --output json)
+          echo "principal_id=$(echo $identity | jq -r '.principalId')" >> $GITHUB_OUTPUT
+          echo "client_id=$(echo $identity | jq -r '.clientId')" >> $GITHUB_OUTPUT
+          echo "resource_id=$(echo $identity | jq -r '.id')" >> $GITHUB_OUTPUT
+
+      - name: Grant the Managed Identity permission to Pull from ACR
+        run: |
+          az role assignment create \
+            --assignee ${{ steps.identity.outputs.principal_id }} \
+            --scope $(az acr show -n ${{ needs.setup.outputs.registry_name }} --query id --output tsv) \
+            --role "AcrPull"
+
+      - name: Get Demo app staging URL
+        id: staging
+        run: |
+          fqdn=$(az containerapp show \
+            --name ${{ needs.setup.outputs.demo_app_name }} \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)
+          prefix=$(echo "$fqdn" | cut -d'.' -f1)
+          suffix=$(echo "$fqdn" | cut -d'.' -f2-)
+          host="${prefix}---staging.${suffix}"
+          echo "host=$host" >> $GITHUB_OUTPUT
+
+      - name: Get Lighthouse CI Server Host
+        id: lhci_server
+        run: |
+          echo "host=$(az containerapp show \
+            --name ${{ needs.setup.outputs.lhci_server_name }} \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)" >> $GITHUB_OUTPUT
+
+      - name: Get Lightouse CI Build Token
+        id: lhci_token
+        run: |
+          token=$(az keyvault secret show \
+            --vault-name ${{ needs.setup.outputs.keyvault_name }} \
+            --name "LHCI-TOKEN" \
+            --query value \
+            --output tsv)
+          echo "::add-mask::$token"
+          echo "token=$token" >> $GITHUB_OUTPUT
+
+      - name: Deploy Container App
+        run: |
+          az deployment group create \
+          --template-file ./lighthouse-ci/client/deployment/container-instance.bicep \
+          --parameters \
+            userAssignedIdentity=${{ steps.identity.outputs.resource_id }} \
+            containerInstanceName=${{ needs.setup.outputs.lhci_client_name }} \
+            registryHost=${{ needs.setup.outputs.registry_host }} \
+            imageName=${{ needs.setup.outputs.lhci_client_image_name }} \
+            URL=https://${{ steps.staging.outputs.host }} \
+            LHCI_SERVER=https://${{ steps.lhci_server.outputs.host }} \
+            LHCI_TOKEN=${{ steps.lhci_token.outputs.token }} \
+            LHCI_BUILD_CONTEXT__GIT_REMOTE=${{ github.event.repository.html_url }} \
+            LHCI_BUILD_CONTEXT__GITHUB_REPO_SLUG=${{ github.event.repository.full_name }} \
+            LHCI_BUILD_CONTEXT__CURRENT_HASH=${{ github.sha }} \
+            LHCI_BUILD_CONTEXT__ANCESTOR_HASH=${{ github.event.before }} \
+            LHCI_BUILD_CONTEXT__COMMIT_TIME=${{ github.event.head_commit.timestamp }} \
+            LHCI_BUILD_CONTEXT__CURRENT_BRANCH=${{ github.event.repository.default_branch }} \
+            LHCI_BUILD_CONTEXT__COMMIT_MESSAGE="${{ github.event.head_commit.message }}" \
+            LHCI_BUILD_CONTEXT__AUTHOR="${{ github.event.head_commit.author.name }} <${{ github.event.head_commit.author.email }}>" \
+            LHCI_BUILD_CONTEXT__EXTERNAL_BUILD_URL=${{ github.event.head_commit.url }}
+
+      - name: Lighthouse Client results
+        run: |
+          echo "Waiting for Lighthouse Client" 
+          while true; do
+            status=$(az container show \
+              --name ${{ needs.setup.outputs.lhci_client_name }} \
+              --query instanceView.state \
+              --output tsv)
+            if [[ ! "$status" =~ ^(Pending|Running)$ ]]; then
+              break
+            fi
+            sleep 5
+          done
+          echo "Lighthouse Client is completed. Current status: $status"
+          if [ "$status" != "Succeeded" ]; then
+            exit 1
+          fi
+
+  swap-demo-app-production:
+    runs-on: ubuntu-latest
+    needs: [setup, deploy-lighthouse-client]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Default Resource Group
+        run: az config set defaults.group=${{ needs.setup.outputs.resource_group }}
+
+      - name: Swap production and staging
+        env:
+          RESOURCE_GROUP_NAME: ${{ needs.setup.outputs.resource_group }}
+          CONTAINER_APP_NAME: ${{ needs.setup.outputs.demo_app_name }}
+        run: bash ./demo-app/deployment/swap_staging_production.sh
+
+      - name: Inactive old revisions
+        env:
+          RESOURCE_GROUP_NAME: ${{ needs.setup.outputs.resource_group }}
+          CONTAINER_APP_NAME: ${{ needs.setup.outputs.demo_app_name }}
+        run: bash ./demo-app/deployment/inactive_old_revisions.sh
