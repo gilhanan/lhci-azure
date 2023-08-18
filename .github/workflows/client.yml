@@ -186,7 +186,7 @@ jobs:
           paths_queries=($(jq -r '.collect.urls[]' client/config/config.json))
           for idx in "${!paths_queries[@]}"; do
             az deployment group create \
-              --template-file ./templates/container.json \
+              --template-file ./client/templates/container.json \
               --parameters \
               userAssignedIdentity=${{ steps.identity.outputs.resource_id }} \
               registryHost=${{ steps.job_metadata.outputs.registry_host }} \
@@ -199,49 +199,53 @@ jobs:
               PATH_QUERY="${paths_queries[$idx]}"
           done
 
-      # - name: Polling for deployment status
-      #   run: |
-      #     paths_queries=($(jq -r '.collect.urls[]' config/config.json))
-      #     all_completed=0
+      - name: Polling for deployment status
+        run: |
+          paths_queries=($(jq -r '.collect.urls[]' config/config.json))
+          all_completed=0
 
-      #     while [ $all_completed -eq 0 ]; do
-      #       all_completed=1
-      #       for idx in "${!paths_queries[@]}"; do
-      #         ci_name="${{ steps.host.outputs.dashed }}-$idx"
+          while [ $all_completed -eq 0 ]; do
+            all_completed=1
+            for idx in "${!paths_queries[@]}"; do
+              ci_name="${{ steps.job_metadata.outputs.ci_name }}-$idx"
 
-      #         status=$(az container show --resource-group ${{ steps.job_metadata.outputs.rg_name }} --name $ci_name --query instanceView.state --output tsv)
-      #         echo "Deployment status for $ci_name: $status"
+              status=$(az container show --name $ci_name --query instanceView.state --output tsv)
+              echo "Deployment status for $ci_name: $status"
 
-      #         if [ "$status" == "Running" ]; then
-      #           all_completed=0
-      #           break
-      #         fi
-      #       done
+              if [ "$status" == "Running" ]; then
+                all_completed=0
+                break
+              fi
+            done
 
-      #       if [ $all_completed -eq 0 ]; then
-      #         sleep 30
-      #       fi
-      #     done
+            if [ $all_completed -eq 0 ]; then
+              sleep 30
+            fi
+          done
 
-      # - name: Create .lighthouseci directory
-      #   run: mkdir -p ./.lighthouseci
+      - name: Create .lighthouseci directory
+        run: mkdir -p ./.lighthouseci
 
-      # - name: Download Lighthouse reports from Azure File Share
-      #   run: |
-      #     az storage file download-batch --destination ./.lighthouseci --source ${{ steps.job_metadata.outputs.file_share_name }} --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }} --account-key ${{ steps.storage_account_key.outputs.value }}
+      - name: Download Lighthouse reports from Azure File Share
+        run: |
+          az storage file download-batch \
+          --destination ./.lighthouseci \
+          --source ${{ steps.job_metadata.outputs.file_share_name }} \
+          --account-name ${{ steps.job_metadata.outputs.storage_name }} \
+          --account-key ${{ steps.storage_account_key.outputs.value }}
 
-      # - name: Git metadata
-      #   id: git_metadata
-      #   run: |
-      #     echo "git_remote=${{github.event.repository.url}}" >> $GITHUB_OUTPUT
-      #     echo "github_repo_slug=${{ github.event.repository.full_name }}" >> $GITHUB_OUTPUT
-      #     echo "current_branch=${{github.ref_name}}" >> $GITHUB_OUTPUT
-      #     echo "current_hash=${{ github.sha }}" >> $GITHUB_OUTPUT
-      #     echo "current_hash_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-      #     echo "ancestor_hash=${{ github.event.before }}" >> $GITHUB_OUTPUT
-      #     echo "commit_time=${{ github.event.head_commit.timestamp }}" >> $GITHUB_OUTPUT
-      #     echo "commit_message=${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
-      #     echo "author=${{ github.event.head_commit.author.name }}" >> $GITHUB_OUTPUT
+      - name: Git metadata
+        id: git_metadata
+        run: |
+          echo "git_remote=${{github.event.repository.url}}" >> $GITHUB_OUTPUT
+          echo "github_repo_slug=${{ github.event.repository.full_name }}" >> $GITHUB_OUTPUT
+          echo "current_branch=${{github.ref_name}}" >> $GITHUB_OUTPUT
+          echo "current_hash=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "current_hash_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "ancestor_hash=${{ github.event.before }}" >> $GITHUB_OUTPUT
+          echo "commit_time=${{ github.event.head_commit.timestamp }}" >> $GITHUB_OUTPUT
+          echo "commit_message=${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
+          echo "author=${{ github.event.head_commit.author.name }}" >> $GITHUB_OUTPUT
 
       # - name: Upload Lighthouse reports to LHCI server
       #   env:
@@ -256,5 +260,3 @@ jobs:
       #     LHCI_BUILD_CONTEXT__AVATAR_URL: "https://www.gravatar.com/avatar"
       #   run: |
       #     npx @lhci/cli@0.12.0 upload --serverBaseUrl=${{ steps.job_metadata.outputs.lhci_server_url }} --token=${{ env.TOKEN }}
-
-      # Delete
