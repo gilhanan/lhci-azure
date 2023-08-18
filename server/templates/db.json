@@ -72,18 +72,6 @@
       }
     },
     {
-      "type": "Microsoft.DBforMySQL/flexibleServers/firewallRules",
-      "apiVersion": "2021-12-01-preview",
-      "name": "[concat(parameters('mysqlServerName'), '/', parameters('mysqlDatabaseName'))]",
-      "dependsOn": [
-        "[resourceId('Microsoft.DBforMySQL/flexibleServers', parameters('mysqlServerName'))]"
-      ],
-      "properties": {
-        "startIpAddress": "0.0.0.0",
-        "endIpAddress": "255.255.255.255"
-      }
-    },
-    {
       "type": "Microsoft.DBforMySQL/flexibleServers/administrators",
       "apiVersion": "2021-12-01-preview",
       "name": "[concat(parameters('mysqlServerName'), '/ActiveDirectory')]",
