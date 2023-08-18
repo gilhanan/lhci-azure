@@ -120,7 +120,7 @@ jobs:
       - name: Build and Push Docker image to ACR
         run: |
           az acr build \
-          -registry ${{ steps.metadata.outputs.registry_name }} \
+          --registry ${{ steps.metadata.outputs.registry_name }} \
           --image ${{ steps.metadata.outputs.full_image_name }} \
           ./client
 
