@@ -2,7 +2,6 @@ name: CICD
 
 concurrency:
   group: ${{ github.workflow }}
-  cancel-in-progress: true
 
 on:
   push:
@@ -29,6 +28,7 @@ jobs:
           app_name=${{ secrets.APP_NAME }}
           alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
           echo "resource_group=$app_name" >> $GITHUB_OUTPUT
+          echo "keyvault_name=$app_name-kv" >> $GITHUB_OUTPUT
           echo "registry_name=$alphabet_app_name" >> $GITHUB_OUTPUT
           echo "storage_name=$alphabet_app_name" >> $GITHUB_OUTPUT
 
@@ -44,6 +44,13 @@ jobs:
 
       - name: Default Resource Group
         run: az config set defaults.group=${{ steps.metadata.outputs.resource_group }}
+
+      - name: Create Azure Key Vault
+        run: |
+          exists=$(az keyvault show --name ${{ steps.metadata.outputs.keyvault_name }} --query name -o tsv | wc -l)
+          if [ $exists -eq 0 ]; then
+            az keyvault create --name ${{ steps.metadata.outputs.keyvault_name }} --enable-rbac-authorization true
+          fi
 
       - name: Create ACR
         run: az acr create -n ${{ steps.metadata.outputs.registry_name }} --sku Basic --admin-enabled true
@@ -224,3 +231,161 @@ jobs:
             mysqlDatabaseName=${{ steps.metadata.outputs.database_name }}
             webAppName=${{ steps.metadata.outputs.webapp_name }}
             dockerImage=${{  steps.metadata.outputs.full_image_name_url }}
+
+  deploy-client:
+    runs-on: ubuntu-latest
+    needs: [build-client, deploy-server]
+    env:
+      LOCATION: "Central US"
+      HOST: "https://smp-euap-pb-cus.azurewebsites.net"
+      TOKEN: "5ff1c161-a717-47db-834a-c9a3931ee3da"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+
+      - name: Map URLs
+        id: host
+        run: |
+          host="${{ env.HOST }}"
+          host=${host#https://}
+          trimmed=${host%/}
+          dashed=${trimmed//./-}
+          echo "trimmed=$trimmed" >> $GITHUB_OUTPUT
+          echo "dashed=$dashed" >> $GITHUB_OUTPUT
+
+      - name: Job metadata
+        id: job_metadata
+        run: |
+          app_name=${{ secrets.APP_NAME }}
+          alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
+          server_app_name=$app_name-server
+          client_app_name=$app_name-client
+          image_tag=$(git rev-parse --short HEAD)
+          registry_name=$alphabet_app_name
+          echo "resource_group=$app_name" >> $GITHUB_OUTPUT
+          echo "registry_name=$registry_name" >> $GITHUB_OUTPUT
+          echo "full_image_name_url=$registry_name.azurecr.io/lhci/client:$image_tag" >> $GITHUB_OUTPUT
+          echo "identity_name=$client_app_name-identity" >> $GITHUB_OUTPUT
+          echo "storage_name=$alphabet_app_name" >> $GITHUB_OUTPUT
+          echo "file_share_name=$image_tag-${{ steps.host.outputs.dashed }}" >> $GITHUB_OUTPUT
+          echo "lhci_server_url=https://$server_app_name.azurewebsites.net/" >> $GITHUB_OUTPUT
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Default Resource Group
+        run: az config set defaults.group=${{ steps.job_metadata.outputs.resource_group }}
+
+      - name: Create User-assigned Managed Identity
+        run: az identity create -n ${{ steps.job_metadata.outputs.identity_name }}
+
+      - name: Retrieve the Managed Identity IDs
+        id: identity
+        run: |
+          identity_output=$(az identity show -n ${{ steps.job_metadata.outputs.identity_name }} -o json)
+          echo "principal_id=$(echo $identity_output | jq -r '.principalId')" >> $GITHUB_OUTPUT
+          echo "client_id=$(echo $identity_output | jq -r '.clientId')" >> $GITHUB_OUTPUT
+          echo "resource_id=$(echo $identity_output | jq -r '.id')" >> $GITHUB_OUTPUT
+
+      - name: Grant the Managed Identity permission to Pull from ACR
+        run: |
+          az role assignment create \
+          --assignee ${{ steps.identity.outputs.principal_id }} \
+          --scope $(az acr show -n ${{ steps.job_metadata.outputs.registry_name }} --query id --output tsv) \
+          --role "AcrPull"
+
+      - name: Get Azure Storage Account Key
+        id: storage_account_key
+        run: |
+          key=$(az storage account keys list --account-name ${{ steps.job_metadata.outputs.storage_name }} --query '[0].value' --output tsv)
+          echo "value=$key" >> $GITHUB_OUTPUT
+
+      - name: Create Azure File Share
+        run: az storage share create \
+          --name ${{ steps.job_metadata.outputs.file_share_name }} \
+          --account-name ${{ steps.job_metadata.outputs.storage_name }} \
+          --account-key ${{ steps.storage_account_key.outputs.value }}
+
+      # - name: Deploy Azure Container Instances
+      #   run: |
+      #     paths_queries=($(jq -r '.collect.urls[]' config/config.json))
+      #     for idx in "${!paths_queries[@]}"; do
+      #       path_query="${paths_queries[$idx]}"
+      #       ci_name="${{ steps.host.outputs.dashed }}-$idx"
+      #       az deployment group create \
+      #         --template-file ./templates/container.json \
+      #         --parameters acrName=${{ secrets.AZURE_CONTAINER_REGISTRY_NAME }} \
+      #         acrUserName=${{ steps.acr_credentials.outputs.registry_username }} \
+      #         acrPassword=${{ steps.acr_credentials.outputs.registry_password }} \
+      #         acrFullImageName=${{ needs.build-and-push.outputs.full_image_name }} \
+      #         ciName=$ci_name \
+      #         fileShareName=${{ steps.job_metadata.outputs.file_share_name }} \
+      #         storageAccountName=${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }} \
+      #         storageAccountKey=${{ steps.storage_account_key.outputs.value }} \
+      #         HOST=${{ env.HOST }} \
+      #         PATH_QUERY=$path_query
+      #     done
+
+      # - name: Polling for deployment status
+      #   run: |
+      #     paths_queries=($(jq -r '.collect.urls[]' config/config.json))
+      #     all_completed=0
+
+      #     while [ $all_completed -eq 0 ]; do
+      #       all_completed=1
+      #       for idx in "${!paths_queries[@]}"; do
+      #         ci_name="${{ steps.host.outputs.dashed }}-$idx"
+
+      #         status=$(az container show --resource-group ${{ steps.job_metadata.outputs.rg_name }} --name $ci_name --query instanceView.state --output tsv)
+      #         echo "Deployment status for $ci_name: $status"
+
+      #         if [ "$status" == "Running" ]; then
+      #           all_completed=0
+      #           break
+      #         fi
+      #       done
+
+      #       if [ $all_completed -eq 0 ]; then
+      #         sleep 30
+      #       fi
+      #     done
+
+      # - name: Create .lighthouseci directory
+      #   run: mkdir -p ./.lighthouseci
+
+      # - name: Download Lighthouse reports from Azure File Share
+      #   run: |
+      #     az storage file download-batch --destination ./.lighthouseci --source ${{ steps.job_metadata.outputs.file_share_name }} --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }} --account-key ${{ steps.storage_account_key.outputs.value }}
+
+      # - name: Git metadata
+      #   id: git_metadata
+      #   run: |
+      #     echo "git_remote=${{github.event.repository.url}}" >> $GITHUB_OUTPUT
+      #     echo "github_repo_slug=${{ github.event.repository.full_name }}" >> $GITHUB_OUTPUT
+      #     echo "current_branch=${{github.ref_name}}" >> $GITHUB_OUTPUT
+      #     echo "current_hash=${{ github.sha }}" >> $GITHUB_OUTPUT
+      #     echo "current_hash_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      #     echo "ancestor_hash=${{ github.event.before }}" >> $GITHUB_OUTPUT
+      #     echo "commit_time=${{ github.event.head_commit.timestamp }}" >> $GITHUB_OUTPUT
+      #     echo "commit_message=${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
+      #     echo "author=${{ github.event.head_commit.author.name }}" >> $GITHUB_OUTPUT
+
+      # - name: Upload Lighthouse reports to LHCI server
+      #   env:
+      #     LHCI_BUILD_CONTEXT__GIT_REMOTE: ${{ steps.git_metadata.outputs.git_remote }}
+      #     LHCI_BUILD_CONTEXT__GITHUB_REPO_SLUG: ${{ steps.git_metadata.outputs.github_repo_slug }}
+      #     LHCI_BUILD_CONTEXT__CURRENT_BRANCH: ${{ steps.git_metadata.outputs.current_branch }}
+      #     LHCI_BUILD_CONTEXT__CURRENT_HASH: ${{ steps.git_metadata.outputs.current_hash }}
+      #     LHCI_BUILD_CONTEXT__ANCESTOR_HASH: ${{ steps.git_metadata.outputs.ancestor_hash }}
+      #     LHCI_BUILD_CONTEXT__COMMIT_TIME: ${{ steps.git_metadata.outputs.commit_time }}
+      #     LHCI_BUILD_CONTEXT__COMMIT_MESSAGE: "${{ steps.git_metadata.outputs.commit_message}}"
+      #     LHCI_BUILD_CONTEXT__AUTHOR: "${{ steps.git_metadata.outputs.author}}"
+      #     LHCI_BUILD_CONTEXT__AVATAR_URL: "https://www.gravatar.com/avatar"
+      #   run: |
+      #     npx @lhci/cli@0.12.0 upload --serverBaseUrl=${{ steps.job_metadata.outputs.lhci_server_url }} --token=${{ env.TOKEN }}

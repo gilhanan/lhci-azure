@@ -1,0 +1,82 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "acrName": { "type": "string" },
+    "acrFullImageName": { "type": "string" },
+    "acrUserName": { "type": "string" },
+    "acrPassword": { "type": "securestring" },
+    "fileShareName": { "type": "string" },
+    "storageAccountName": { "type": "string" },
+    "storageAccountKey": { "type": "securestring" },
+    "ciName": { "type": "string" },
+    "ciCPU": { "type": "int", "defaultValue": 2 },
+    "ciMemoryInGB": { "type": "int", "defaultValue": 2 },
+    "HOST": { "type": "string" },
+    "PATH_QUERY": { "type": "string" }
+  },
+  "variables": {
+    "ciFullImageName": "[format('{0}.azurecr.io/{1}', parameters('acrName'), parameters('acrFullImageName'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ContainerInstance/containerGroups",
+      "apiVersion": "2022-10-01-preview",
+      "name": "[parameters('ciName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "restartPolicy": "Never",
+        "osType": "Linux",
+        "sku": "Standard",
+        "imageRegistryCredentials": [
+          {
+            "server": "[concat(parameters('acrName'),'.azurecr.io')]",
+            "username": "[parameters('acrUserName')]",
+            "password": "[parameters('acrPassword')]"
+          }
+        ],
+        "volumes": [
+          {
+            "name": "lhci-volume",
+            "azureFile": {
+              "shareName": "[parameters('fileShareName')]",
+              "readOnly": false,
+              "storageAccountName": "[parameters('storageAccountName')]",
+              "storageAccountKey": "[parameters('storageAccountKey')]"
+            }
+          }
+        ],
+        "containers": [
+          {
+            "name": "[parameters('ciName')]",
+            "properties": {
+              "image": "[variables('ciFullImageName')]",
+              "resources": {
+                "requests": {
+                  "cpu": "[parameters('ciCPU')]",
+                  "memoryInGB": "[parameters('ciMemoryInGB')]"
+                }
+              },
+              "volumeMounts": [
+                {
+                  "name": "lhci-volume",
+                  "mountPath": "/lhci/.lighthouseci"
+                }
+              ],
+              "environmentVariables": [
+                {
+                  "name": "HOST",
+                  "value": "[parameters('HOST')]"
+                },
+                {
+                  "name": "PATH_QUERY",
+                  "value": "[parameters('PATH_QUERY')]"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
