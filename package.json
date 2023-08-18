@@ -6,7 +6,7 @@
   "module": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "cross-env ENVIRONMENT=development MYSQL_SERVER_NAME=gh-lhci-server-db MYSQL_DATABASE_NAME=lhci-data SQL_DIALECT=mysql WEBSITES_PORT=9001 npm start"
+    "dev": "cross-env WEBSITES_PORT=9001 SQL_DIALECT=sqlite MYSQL_DATABASE_NAME=lhci-data SQL_DATABASE_PATH=./lhci.db  npm start"
   },
   "dependencies": {
     "@azure/identity": "^3.3.0",
@@ -15,8 +15,5 @@
     "cross-env": "^7.0.3",
     "mysql2": "^2.1.0",
     "sqlite3": "^5.1.6"
-  },
-  "devDependencies": {
-    "@azure/identity-vscode": "^1.0.0"
   }
 }
