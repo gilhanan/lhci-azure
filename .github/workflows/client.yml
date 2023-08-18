@@ -246,3 +246,5 @@ jobs:
       #     LHCI_BUILD_CONTEXT__AVATAR_URL: "https://www.gravatar.com/avatar"
       #   run: |
       #     npx @lhci/cli@0.12.0 upload --serverBaseUrl=${{ steps.job_metadata.outputs.lhci_server_url }} --token=${{ env.TOKEN }}
+
+      # Delete
