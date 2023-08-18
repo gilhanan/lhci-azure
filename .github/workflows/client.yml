@@ -29,6 +29,7 @@ jobs:
         run: |
           app_name=${{ secrets.APP_NAME }}
           alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
+          echo "client_id=${{ secrets.AZURE_CLIENT_ID }}" >> $GITHUB_OUTPUT
           echo "resource_group=$app_name" >> $GITHUB_OUTPUT
           echo "keyvault_name=$app_name-kv" >> $GITHUB_OUTPUT
           echo "registry_name=$alphabet_app_name" >> $GITHUB_OUTPUT
