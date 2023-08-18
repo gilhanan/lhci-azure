@@ -54,6 +54,13 @@ jobs:
             az keyvault create --name ${{ steps.metadata.outputs.keyvault_name }} --enable-rbac-authorization true
           fi
 
+      - name: Assign Key Vault Secrets Officer role to the Azure Active Directory Application
+        run: |
+          az role assignment create \
+          --assignee ${{ steps.metadata.outputs.client_id }} \
+          --scope $(az keyvault show --name ${{ steps.metadata.outputs.keyvault_name }} --query id --output tsv) \
+          --role "Key Vault Secrets Officer"
+
       - name: Create ACR
         run: az acr create -n ${{ steps.metadata.outputs.registry_name }} --sku Basic --admin-enabled true
 
