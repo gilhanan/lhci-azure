@@ -102,8 +102,11 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Default Resource Group
+        run: az config set defaults.group=${{ steps.metadata.outputs.resource_group }}
+
       - name: Create User-assigned Managed Identity
-        run: az identity create -g ${{ steps.metadata.outputs.resource_group }} -n ${{ steps.metadata.outputs.identity_name }}
+        run: az identity create -n ${{ steps.metadata.outputs.identity_name }}
 
       - name: Retrieve the Managed Identity IDs
         id: identity
