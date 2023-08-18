@@ -5,7 +5,6 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
@@ -31,6 +30,7 @@ jobs:
           alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
           echo "resource_group=$app_name" >> $GITHUB_OUTPUT
           echo "registry_name=$alphabet_app_name" >> $GITHUB_OUTPUT
+          echo "storage_name=$alphabet_app_name" >> $GITHUB_OUTPUT
 
       - name: Log in to Azure
         uses: azure/login@v1
@@ -42,8 +42,14 @@ jobs:
       - name: Create Resource Group
         run: az group create -n ${{ steps.metadata.outputs.resource_group }} -l "${{ env.LOCATION }}"
 
+      - name: Default Resource Group
+        run: az config set defaults.group=${{ steps.metadata.outputs.resource_group }}
+
       - name: Create ACR
-        run: az acr create -g ${{ steps.metadata.outputs.resource_group }} -n ${{ steps.metadata.outputs.registry_name }} --sku Basic --admin-enabled true
+        run: az acr create -n ${{ steps.metadata.outputs.registry_name }} --sku Basic --admin-enabled true
+
+      - name: Create Azure Storage Account
+        run: az storage account create -n ${{ steps.metadata.outputs.storage_name }}  --sku Standard_LRS
 
   build-server:
     needs: [setup]
@@ -56,9 +62,10 @@ jobs:
         id: metadata
         run: |
           app_name=${{ secrets.APP_NAME }}
+          image_tag=$(git rev-parse --short HEAD)
           alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
           echo "registry_name=$alphabet_app_name" >> $GITHUB_OUTPUT
-          echo "full_image_name=lhci/server:${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "full_image_name=lhci/server:$image_tag" >> $GITHUB_OUTPUT
 
       - name: Log in to Azure
         uses: azure/login@v1
@@ -73,9 +80,38 @@ jobs:
       - name: Build and Push Docker image to ACR
         run: az acr build -r ${{ steps.metadata.outputs.registry_name }} -t ${{ steps.metadata.outputs.full_image_name }} ./server
 
+  build-client:
+    needs: [setup]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Metadata
+        id: metadata
+        run: |
+          app_name=${{ secrets.APP_NAME }}
+          image_tag=$(git rev-parse --short HEAD)
+          alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
+          echo "registry_name=$alphabet_app_name" >> $GITHUB_OUTPUT
+          echo "full_image_name=lhci/client:$image_tag" >> $GITHUB_OUTPUT
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: az acr login -n ${{ steps.metadata.outputs.registry_name }}
+
+      - name: Build and Push Docker image to ACR
+        run: az acr build -r ${{ steps.metadata.outputs.registry_name }} -t ${{ steps.metadata.outputs.full_image_name }} ./client
+
   deploy-server:
     runs-on: ubuntu-latest
-    needs: [setup, build-server]
+    needs: [build-server]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -86,10 +122,11 @@ jobs:
           app_name=${{ secrets.APP_NAME }}
           alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
           server_app_name=$app_name-server
+          image_tag=$(git rev-parse --short HEAD)
           registry_name=$alphabet_app_name
           echo "resource_group=$app_name" >> $GITHUB_OUTPUT
           echo "registry_name=$registry_name" >> $GITHUB_OUTPUT
-          echo "full_image_name_url=$registry_name.azurecr.io/lhci/server:${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "full_image_name_url=$registry_name.azurecr.io/lhci/server:$image_tag" >> $GITHUB_OUTPUT
           echo "mysql_server_name=$server_app_name-db" >> $GITHUB_OUTPUT
           echo "identity_name=$server_app_name-identity" >> $GITHUB_OUTPUT
           echo "webapp_name=$server_app_name-app" >> $GITHUB_OUTPUT

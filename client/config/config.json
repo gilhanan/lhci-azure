@@ -1,0 +1,10 @@
+{
+  "collect": {
+    "numberOfRuns": 21,
+    "urls": [
+      "/en-US/marketplace/apps?product=office",
+      "/en-US/product/web-apps/absentify1649267151463.absentify",
+      "/embed/en-US/product/power-bi-visuals/WA104380756?product=power-bi-visuals"
+    ]
+  }
+}

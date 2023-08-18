@@ -1,0 +1,49 @@
+{
+  "common": {
+    "collect": {
+      "numberOfRuns": 7,
+      "urlsPaths": [
+        {
+          "pathname": "/en-US/marketplace/apps",
+          "params": {
+            "product": "office"
+          }
+        },
+        {
+          "pathname": "/en-US/product/web-apps/absentify1649267151463.absentify"
+        },
+        {
+          "pathname": "/embed/en-US/product/power-bi-visuals/WA104380756",
+          "params": {
+            "product": "power-bi-visuals"
+          }
+        }
+      ]
+    },
+    "upload": {
+      "serverBaseUrl": "https://gil-hanan-lhci-server.azurewebsites.net/"
+    }
+  },
+  "projects": [
+    {
+      "hostPattern": "http:\\/\\/localhost:3000",
+      "uploadTokenKey": "APPSOURCE_LOCAL"
+    },
+    {
+      "hostPattern": "https:\\/\\/appgallery\\.spza-staging\\.net",
+      "uploadTokenKey": "APPSOURCE_DOGFOOD"
+    },
+    {
+      "hostPattern": "https:\\/\\/smp-euap-pb-(.+)(-staging)?\\.azurewebsites\\.net",
+      "uploadTokenKey": "APPSOURCE_CANARY_REGION"
+    },
+    {
+      "hostPattern": "https:\\/\\/smp-prod-pb-(.+)(-staging)?\\.azurewebsites\\.net",
+      "uploadTokenKey": "APPSOURCE_PROD_REGION"
+    },
+    {
+      "hostPattern": "https:\\/\\/appsource\\.microsoft\\.com",
+      "uploadTokenKey": "APPSOURCE_PROD"
+    }
+  ]
+}

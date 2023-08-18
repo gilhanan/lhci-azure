@@ -1,0 +1,29 @@
+{
+  "name": "lhci-client",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "lighthouse": "lighthouse",
+    "start": "npm run lhci:collect",
+    "lighthouse-cli": "lighthouse --config-path=./src/lighthouse-cli.js --output-path=./.lighthousecli/report.html --view",
+    "lighthouse-cli:local": "npm run lighthouse-cli -- http://localhost:3000/en-US",
+    "lighthouse-cli:df": "npm run lighthouse-cli -- https://appgallery.spza-staging.net/en-US",
+    "lighthouse-cli:canary-region": "npm run lighthouse-cli -- https://smp-euap-pb-cus.azurewebsites.net/en-US",
+    "lighthouse-cli:canary": "npm run lighthouse-cli -- https://appgallery.spza-canary.net/en-US",
+    "lighthouse-cli:prod": "npm run lighthouse-cli -- https://appsource.microsoft.com/en-US",
+    "lhci:collect": "lhci collect --config=./src/lighthouse-ci.cjs",
+    "lhci:autorun": "lhci autorun --config=./src/lighthouse-ci.cjs",
+    "lhci:local": "cross-env HOST=http://localhost:3000 npm run lhci:autorun",
+    "lhci:df": "cross-env HOST=https://appgallery.spza-staging.net npm run lhci:autorun",
+    "lhci:canary-region": "cross-env HOST=https://smp-euap-pb-cus.azurewebsites.net npm run lhci:autorun",
+    "lhci:canary": "cross-env HOST=https://appgallery.spza-staging.net npm run lhci:autorun",
+    "lhci:prod": "cross-env HOST=https://appsource.microsoft.com npm run lhci:autorun"
+  },
+  "dependencies": {
+    "@lhci/cli": "0.12.0"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3"
+  }
+}
