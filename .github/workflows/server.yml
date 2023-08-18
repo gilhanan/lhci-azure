@@ -40,13 +40,20 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Create Resource Group
-        run: az group create -n ${{ steps.metadata.outputs.resource_group }} -l "${{ env.LOCATION }}"
+        run: |
+          az group create \
+          --name ${{ steps.metadata.outputs.resource_group }} \
+          --location "${{ env.LOCATION }}"
 
       - name: Default Resource Group
         run: az config set defaults.group=${{ steps.metadata.outputs.resource_group }}
 
       - name: Create ACR
-        run: az acr create -n ${{ steps.metadata.outputs.registry_name }} --sku Basic --admin-enabled true
+        run: |
+          az acr create \
+          --name ${{ steps.metadata.outputs.registry_name }} \
+          --sku Basic \
+          --admin-enabled true
 
   build-server:
     needs: [setup]
@@ -72,10 +79,14 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Login to ACR
-        run: az acr login -n ${{ steps.metadata.outputs.registry_name }}
+        run: az acr login --name ${{ steps.metadata.outputs.registry_name }}
 
       - name: Build and Push Docker image to ACR
-        run: az acr build -r ${{ steps.metadata.outputs.registry_name }} -t ${{ steps.metadata.outputs.full_image_name }} ./server
+        run: |
+          az acr build
+          --registry ${{ steps.metadata.outputs.registry_name }} \
+          --image ${{ steps.metadata.outputs.full_image_name }} \
+          ./server
 
   deploy-server:
     runs-on: ubuntu-latest
@@ -116,10 +127,12 @@ jobs:
       - name: Retrieve the Managed Identity IDs
         id: identity
         run: |
-          identity_output=$(az identity show -n ${{ steps.metadata.outputs.identity_name }} -o json)
-          echo "principal_id=$(echo $identity_output | jq -r '.principalId')" >> $GITHUB_OUTPUT
-          echo "client_id=$(echo $identity_output | jq -r '.clientId')" >> $GITHUB_OUTPUT
-          echo "resource_id=$(echo $identity_output | jq -r '.id')" >> $GITHUB_OUTPUT
+          identity=$(az identity show \
+          --name ${{ steps.metadata.outputs.identity_name }} \
+          --output json)
+          echo "principal_id=$(echo $identity | jq -r '.principalId')" >> $GITHUB_OUTPUT
+          echo "client_id=$(echo $identity | jq -r '.clientId')" >> $GITHUB_OUTPUT
+          echo "resource_id=$(echo $identity | jq -r '.id')" >> $GITHUB_OUTPUT
 
       - name: Grant the Managed Identity permission to Pull from ACR
         run: |
@@ -131,7 +144,10 @@ jobs:
       - name: AAD Application display name
         id: aad_app_display_name
         run: |
-          app_name=$(az ad app show --id ${{ secrets.AZURE_CLIENT_ID }} --query "displayName" -o tsv)
+          app_name=$(az ad app show \
+          --id ${{ secrets.AZURE_CLIENT_ID }} \
+          --query "displayName" \
+          --output tsv)
           echo "value=$app_name" >> $GITHUB_OUTPUT
 
       - name: Generate MySQL Admin Credentials
@@ -170,8 +186,15 @@ jobs:
 
       - name: Create MySQL User
         run: |
-          password=$(az account get-access-token --resource https://ossrdbms-aad.database.windows.net --query accessToken -o tsv)
-          mysql --host=${{ steps.metadata.outputs.mysql_server_name }}.mysql.database.azure.com --user=${{ steps.aad_app_display_name.outputs.value }} --password=$password --enable-cleartext-plugin << EOF
+          password=$(az account get-access-token \
+          --resource https://ossrdbms-aad.database.windows.net \
+          --query accessToken \
+          --output tsv)
+          mysql \
+          --host=${{ steps.metadata.outputs.mysql_server_name }}.mysql.database.azure.com \
+          --user=${{ steps.aad_app_display_name.outputs.value }} \
+          --password=$password \
+          --enable-cleartext-plugin << EOF
           SET aad_auth_validate_oids_in_tenant = OFF;
           DROP USER IF EXISTS 'lhci'@'%';
           CREATE AADUSER 'lhci' IDENTIFIED BY '${{ steps.identity.outputs.client_id }}';
