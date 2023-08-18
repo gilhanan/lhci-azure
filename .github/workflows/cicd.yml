@@ -30,8 +30,8 @@ jobs:
           alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
           echo "resource_group=$app_name" >> $GITHUB_OUTPUT
           echo "keyvault_name=$app_name-kv" >> $GITHUB_OUTPUT
-          echo "registry_name=$alphabet_app_nameacr" >> $GITHUB_OUTPUT
-          echo "storage_name=$alphabet_app_namestorage" >> $GITHUB_OUTPUT
+          echo "registry_name=$alphabet_app_name" >> $GITHUB_OUTPUT
+          echo "storage_name=$alphabet_app_name" >> $GITHUB_OUTPUT
 
       - name: Log in to Azure
         uses: azure/login@v1
@@ -72,7 +72,7 @@ jobs:
           app_name=${{ secrets.APP_NAME }}
           image_tag=$(git rev-parse --short HEAD)
           alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
-          echo "registry_name=$alphabet_app_nameacr" >> $GITHUB_OUTPUT
+          echo "registry_name=$alphabet_app_name" >> $GITHUB_OUTPUT
           echo "full_image_name=lhci/server:$image_tag" >> $GITHUB_OUTPUT
 
       - name: Log in to Azure
@@ -101,7 +101,7 @@ jobs:
           app_name=${{ secrets.APP_NAME }}
           image_tag=$(git rev-parse --short HEAD)
           alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
-          echo "registry_name=$alphabet_app_nameacr" >> $GITHUB_OUTPUT
+          echo "registry_name=$alphabet_app_name" >> $GITHUB_OUTPUT
           echo "full_image_name=lhci/client:$image_tag" >> $GITHUB_OUTPUT
 
       - name: Log in to Azure
@@ -131,7 +131,7 @@ jobs:
           alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
           server_app_name=$app_name-server
           image_tag=$(git rev-parse --short HEAD)
-          registry_name=$alphabet_app_nameacr
+          registry_name=$alphabet_app_name
           echo "resource_group=$app_name" >> $GITHUB_OUTPUT
           echo "registry_name=$registry_name" >> $GITHUB_OUTPUT
           echo "full_image_name_url=$registry_name.azurecr.io/lhci/server:$image_tag" >> $GITHUB_OUTPUT
@@ -264,12 +264,12 @@ jobs:
           server_app_name=$app_name-server
           client_app_name=$app_name-client
           image_tag=$(git rev-parse --short HEAD)
-          registry_name=$alphabet_app_nameacr
+          registry_name=$alphabet_app_name
           echo "resource_group=$app_name" >> $GITHUB_OUTPUT
           echo "registry_name=$registry_name" >> $GITHUB_OUTPUT
           echo "full_image_name_url=$registry_name.azurecr.io/lhci/client:$image_tag" >> $GITHUB_OUTPUT
           echo "identity_name=$client_app_name-identity" >> $GITHUB_OUTPUT
-          echo "storage_name=$alphabet_app_namestorage" >> $GITHUB_OUTPUT
+          echo "storage_name=$alphabet_app_name" >> $GITHUB_OUTPUT
           echo "file_share_name=$image_tag-${{ steps.host.outputs.dashed }}" >> $GITHUB_OUTPUT
           echo "lhci_server_url=https://$server_app_name.azurewebsites.net/" >> $GITHUB_OUTPUT
 
