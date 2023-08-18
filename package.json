@@ -6,11 +6,10 @@
   "module": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "cross-env ENVIRONMENT=development KEYVAULT_NAME=gh-lhci-keyvault MYSQL_SERVER_NAME=gh-lhci-server-db MYSQL_DATABASE_NAME=lhci-data SQL_DIALECT=mysql WEBSITES_PORT=9001 npm start"
+    "dev": "cross-env ENVIRONMENT=development MYSQL_SERVER_NAME=gh-lhci-server-db MYSQL_DATABASE_NAME=lhci-data SQL_DIALECT=mysql WEBSITES_PORT=9001 npm start"
   },
   "dependencies": {
     "@azure/identity": "^3.3.0",
-    "@azure/keyvault-secrets": "^4.7.0",
     "@lhci/cli": "0.12.0",
     "@lhci/server": "npm:@gilhanan/lhci-server@0.0.4",
     "cross-env": "^7.0.3",

@@ -3,7 +3,6 @@ const {
   useIdentityPlugin,
   DefaultAzureCredential,
 } = require("@azure/identity");
-const { SecretClient } = require("@azure/keyvault-secrets");
 
 const {
   IDENTITY_ENDPOINT,
@@ -34,9 +33,7 @@ async function getAccessToken() {
 }
 
 function getUser() {
-  return IDENTITY_ENDPOINT
-    ? "lhci"
-    : "lhci@gilhanangmail.onmicrosoft.com";
+  return IDENTITY_ENDPOINT ? "lhci" : "lhci@gilhanangmail.onmicrosoft.com";
 }
 
 async function startServer() {
