@@ -234,7 +234,7 @@ jobs:
 
   deploy-client:
     runs-on: ubuntu-latest
-    needs: [build-client, deploy-server]
+    needs: [build-client] # [build-client, deploy-server]
     env:
       LOCATION: "Central US"
       HOST: "https://smp-euap-pb-cus.azurewebsites.net"
