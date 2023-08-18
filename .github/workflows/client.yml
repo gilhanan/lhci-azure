@@ -129,12 +129,15 @@ jobs:
           client_app_name=$app_name-client
           image_tag=$(git rev-parse --short HEAD)
           registry_name=$alphabet_app_name
+          registry_host=$registry_name.azurecr.io
           echo "resource_group=$app_name" >> $GITHUB_OUTPUT
           echo "registry_name=$registry_name" >> $GITHUB_OUTPUT
-          echo "full_image_name_url=$registry_name.azurecr.io/lhci/client:$image_tag" >> $GITHUB_OUTPUT
+          echo "registry_host=$registry_host" >> $GITHUB_OUTPUT
+          echo "full_image_name_url=$registry_host/lhci/client:$image_tag" >> $GITHUB_OUTPUT
           echo "identity_name=$client_app_name-identity" >> $GITHUB_OUTPUT
           echo "storage_name=$alphabet_app_name" >> $GITHUB_OUTPUT
           echo "file_share_name=$image_tag-${{ steps.host.outputs.dashed }}" >> $GITHUB_OUTPUT
+          echo "ci_name=$client_app_name-${{ steps.host.outputs.dashed }}" >> $GITHUB_OUTPUT
           echo "lhci_server_url=https://$server_app_name.azurewebsites.net/" >> $GITHUB_OUTPUT
 
       - name: Log in to Azure
@@ -178,25 +181,23 @@ jobs:
           --account-name ${{ steps.job_metadata.outputs.storage_name }} \
           --account-key ${{ steps.storage_account_key.outputs.value }}
 
-      # - name: Deploy Azure Container Instances
-      #   run: |
-      #     paths_queries=($(jq -r '.collect.urls[]' config/config.json))
-      #     for idx in "${!paths_queries[@]}"; do
-      #       path_query="${paths_queries[$idx]}"
-      #       ci_name="${{ steps.host.outputs.dashed }}-$idx"
-      #       az deployment group create \
-      #         --template-file ./templates/container.json \
-      #         --parameters acrName=${{ secrets.AZURE_CONTAINER_REGISTRY_NAME }} \
-      #         acrUserName=${{ steps.acr_credentials.outputs.registry_username }} \
-      #         acrPassword=${{ steps.acr_credentials.outputs.registry_password }} \
-      #         acrFullImageName=${{ needs.build-and-push.outputs.full_image_name }} \
-      #         ciName=$ci_name \
-      #         fileShareName=${{ steps.job_metadata.outputs.file_share_name }} \
-      #         storageAccountName=${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }} \
-      #         storageAccountKey=${{ steps.storage_account_key.outputs.value }} \
-      #         HOST=${{ env.HOST }} \
-      #         PATH_QUERY=$path_query
-      #     done
+      - name: Deploy Azure Container Instances
+        run: |
+          paths_queries=($(jq -r '.collect.urls[]' client/config/config.json))
+          for idx in "${!paths_queries[@]}"; do
+            az deployment group create \
+              --template-file ./templates/container.json \
+              --parameters \
+              userAssignedIdentity=${{ steps.identity.outputs.resource_id }} \
+              registryHost=${{ steps.job_metadata.outputs.registry_host }} \
+              fullImageName=${{ steps.job_metadata.outputs.full_image_name_url }} \
+              storageAccountName=${{ steps.job_metadata.outputs.storage_name }} \
+              storageAccountKey=${{ steps.storage_account_key.outputs.value }} \
+              fileShareName=${{ steps.job_metadata.outputs.file_share_name }} \
+              ciName="${{ steps.job_metadata.outputs.ci_name }}-$idx" \
+              HOST=${{ env.HOST }} \
+              PATH_QUERY="${paths_queries[$idx]}"
+          done
 
       # - name: Polling for deployment status
       #   run: |

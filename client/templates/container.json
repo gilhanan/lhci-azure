@@ -2,21 +2,17 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "acrName": { "type": "string" },
-    "acrFullImageName": { "type": "string" },
-    "acrUserName": { "type": "string" },
-    "acrPassword": { "type": "securestring" },
-    "fileShareName": { "type": "string" },
+    "userAssignedIdentity": { "type": "string" },
+    "registryHost": { "type": "string" },
+    "fullImageName": { "type": "string" },
     "storageAccountName": { "type": "string" },
     "storageAccountKey": { "type": "securestring" },
+    "fileShareName": { "type": "string" },
     "ciName": { "type": "string" },
-    "ciCPU": { "type": "int", "defaultValue": 2 },
-    "ciMemoryInGB": { "type": "int", "defaultValue": 2 },
     "HOST": { "type": "string" },
-    "PATH_QUERY": { "type": "string" }
-  },
-  "variables": {
-    "ciFullImageName": "[format('{0}.azurecr.io/{1}', parameters('acrName'), parameters('acrFullImageName'))]"
+    "PATH_QUERY": { "type": "string" },
+    "ciCPU": { "type": "int", "defaultValue": 2 },
+    "ciMemoryInGB": { "type": "int", "defaultValue": 2 }
   },
   "resources": [
     {
@@ -24,15 +20,20 @@
       "apiVersion": "2022-10-01-preview",
       "name": "[parameters('ciName')]",
       "location": "[resourceGroup().location]",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[parameters('userAssignedIdentity')]": {}
+        }
+      },
       "properties": {
         "restartPolicy": "Never",
         "osType": "Linux",
         "sku": "Standard",
         "imageRegistryCredentials": [
           {
-            "server": "[concat(parameters('acrName'),'.azurecr.io')]",
-            "username": "[parameters('acrUserName')]",
-            "password": "[parameters('acrPassword')]"
+            "server": "[parameters('registryHost')]",
+            "identity": "[parameters('userAssignedIdentity')]"
           }
         ],
         "volumes": [
@@ -50,7 +51,7 @@
           {
             "name": "[parameters('ciName')]",
             "properties": {
-              "image": "[variables('ciFullImageName')]",
+              "image": "[parameters('fullImageName')]",
               "resources": {
                 "requests": {
                   "cpu": "[parameters('ciCPU')]",
