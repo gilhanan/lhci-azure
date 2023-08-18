@@ -40,13 +40,10 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Create Resource Group
-        run: az group create --name ${{ steps.metadata.outputs.resource_group }} --location "${{ env.LOCATION }}"
-
-      - name: Default Resource Group
-        run: az config set defaults.group=${{ steps.metadata.outputs.resource_group }}
+        run: az group create -n ${{ steps.metadata.outputs.resource_group }} -l "${{ env.LOCATION }}"
 
       - name: Create ACR
-        run: az acr create -n ${{ steps.metadata.outputs.registry_name }} --sku Basic --admin-enabled true
+        run: az acr create -g ${{ steps.metadata.outputs.resource_group }} -n ${{ steps.metadata.outputs.registry_name }} --sku Basic --admin-enabled true
 
   build:
     needs: [setup]
@@ -60,7 +57,6 @@ jobs:
         run: |
           app_name=${{ secrets.APP_NAME }}
           alphabet_app_name=$(echo "$app_name" | sed 's/-//g')
-          echo "resource_group=$app_name" >> $GITHUB_OUTPUT
           echo "registry_name=$alphabet_app_name" >> $GITHUB_OUTPUT
           echo "full_image_name=lhci/server:${{ github.sha }}" >> $GITHUB_OUTPUT
 
@@ -70,9 +66,6 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Default Resource Group
-        run: az config set defaults.group=${{ steps.metadata.outputs.resource_group }}
 
       - name: Login to ACR
         run: az acr login -n ${{ steps.metadata.outputs.registry_name }}
@@ -110,12 +103,12 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Create User-assigned Managed Identity
-        run: az identity create --name ${{ steps.metadata.outputs.identity_name }}
+        run: az identity create -g ${{ steps.metadata.outputs.resource_group }} -n ${{ steps.metadata.outputs.identity_name }}
 
       - name: Retrieve the Managed Identity IDs
         id: identity
         run: |
-          identity_output=$(az identity show --name ${{ steps.metadata.outputs.identity_name }} -o json)
+          identity_output=$(az identity show -n ${{ steps.metadata.outputs.identity_name }} -o json)
           echo "principal_id=$(echo $identity_output | jq -r '.principalId')" >> $GITHUB_OUTPUT
           echo "client_id=$(echo $identity_output | jq -r '.clientId')" >> $GITHUB_OUTPUT
           echo "resource_id=$(echo $identity_output | jq -r '.id')" >> $GITHUB_OUTPUT
@@ -124,7 +117,7 @@ jobs:
         run: |
           az role assignment create \
           --assignee ${{ steps.identity.outputs.principal_id }} \
-          --scope $(az acr show --name ${{ steps.metadata.outputs.registry_name }} --query id --output tsv) \
+          --scope $(az acr show -n ${{ steps.metadata.outputs.registry_name }} --query id --output tsv) \
           --role "AcrPull"
 
       - name: AAD Application display name
