@@ -153,7 +153,7 @@ jobs:
             administratorLogin=${{ steps.mysql_admin_credentials.outputs.user }} 
             administratorLoginPassword="${{ steps.mysql_admin_credentials.outputs.password }}"
             aadAdministratorLogin=${{ steps.aad_app_display_name.outputs.value }}
-            aadAdministratorSID=${{ steps.identity.outputs.client_id }}
+            aadAdministratorSID=${{ secrets.AZURE_CLIENT_ID }}
 
       # Refresh Azure CLI access token
       - name: Log in to Azure
@@ -164,13 +164,13 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       # Should be done in the template, but the template is not working
-      - name: Set MySQL AAD Admin
-        run: |
-          az mysql flexible-server ad-admin create \
-          --server-name ${{ steps.metadata.outputs.mysql_server_name }} \
-          --display-name ${{ steps.aad_app_display_name.outputs.value }} \
-          --object-id ${{ secrets.AZURE_CLIENT_ID }} \
-          --identity ${{ steps.identity.outputs.resource_id }}
+      # - name: Set MySQL AAD Admin
+      #   run: |
+      #     az mysql flexible-server ad-admin create \
+      #     --server-name ${{ steps.metadata.outputs.mysql_server_name }} \
+      #     --display-name ${{ steps.aad_app_display_name.outputs.value }} \
+      #     --object-id ${{ secrets.AZURE_CLIENT_ID }} \
+      #     --identity ${{ steps.identity.outputs.resource_id }}
 
       - name: Create MySQL User
         run: |
