@@ -47,24 +47,9 @@
       }
     },
     {
-      "type": "Microsoft.DBforMySQL/flexibleServers/administrators",
-      "apiVersion": "2021-12-01-preview",
-      "name": "[format('{0}/{1}', parameters('mysqlServerName'), '/ActiveDirectory')]",
-      "dependsOn": [
-        "[resourceId('Microsoft.DBforMySQL/flexibleServers', parameters('mysqlServerName'))]"
-      ],
-      "properties": {
-        "administratorType": "ActiveDirectory",
-        "login": "[parameters('aadAdministratorLogin')]",
-        "sid": "[parameters('aadAdministratorSID')]",
-        "tenantId": "[parameters('tenantId')]",
-        "identityResourceId": "[parameters('userAssignedIdentity')]"
-      }
-    },
-    {
       "type": "Microsoft.DBforMySQL/flexibleServers/databases",
       "apiVersion": "2021-12-01-preview",
-      "name": "[format('{0}/{1}', parameters('mysqlServerName'), parameters('mysqlDatabaseName'))]",
+      "name": "[concat(parameters('mysqlServerName'), parameters('mysqlDatabaseName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.DBforMySQL/flexibleServers', parameters('mysqlServerName'))]"
       ],
@@ -76,20 +61,7 @@
     {
       "type": "Microsoft.DBforMySQL/flexibleServers/configurations",
       "apiVersion": "2021-12-01-preview",
-      "name": "[format('{0}/{1}', parameters('mysqlServerName'), '/aad_auth_only')]",
-      "dependsOn": [
-        "[resourceId('Microsoft.DBforMySQL/flexibleServers', parameters('mysqlServerName'))]"
-      ],
-      "properties": {
-        "value": "ON",
-        "currentValue": "ON",
-        "source": "user-override"
-      }
-    },
-    {
-      "type": "Microsoft.DBforMySQL/flexibleServers/configurations",
-      "apiVersion": "2021-12-01-preview",
-      "name": "[format('{0}/{1}', parameters('mysqlServerName'), '/require_secure_transport')]",
+      "name": "[concat(parameters('mysqlServerName'), '/require_secure_transport')]",
       "dependsOn": [
         "[resourceId('Microsoft.DBforMySQL/flexibleServers', parameters('mysqlServerName'))]"
       ],
@@ -102,13 +74,41 @@
     {
       "type": "Microsoft.DBforMySQL/flexibleServers/firewallRules",
       "apiVersion": "2021-12-01-preview",
-      "name": "[format('{0}/{1}', parameters('mysqlServerName'), parameters('mysqlDatabaseName'))]",
+      "name": "[concat(parameters('mysqlServerName'), parameters('mysqlDatabaseName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.DBforMySQL/flexibleServers', parameters('mysqlServerName'))]"
       ],
       "properties": {
         "startIpAddress": "0.0.0.0",
         "endIpAddress": "255.255.255.255"
+      }
+    },
+    {
+      "type": "Microsoft.DBforMySQL/flexibleServers/administrators",
+      "apiVersion": "2021-12-01-preview",
+      "name": "[concat(parameters('mysqlServerName'), '/ActiveDirectory')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforMySQL/flexibleServers', parameters('mysqlServerName'))]"
+      ],
+      "properties": {
+        "administratorType": "ActiveDirectory",
+        "login": "[parameters('aadAdministratorLogin')]",
+        "sid": "[parameters('aadAdministratorSID')]",
+        "tenantId": "[parameters('tenantId')]",
+        "identityResourceId": "[parameters('userAssignedIdentity')]"
+      }
+    },
+    {
+      "type": "Microsoft.DBforMySQL/flexibleServers/configurations",
+      "apiVersion": "2021-12-01-preview",
+      "name": "[concat(parameters('mysqlServerName'), '/aad_auth_only')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforMySQL/flexibleServers/administrators', parameters('mysqlServerName'), 'ActiveDirectory')]"
+      ],
+      "properties": {
+        "value": "ON",
+        "currentValue": "ON",
+        "source": "user-override"
       }
     }
   ]
