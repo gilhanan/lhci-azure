@@ -49,7 +49,7 @@
     {
       "type": "Microsoft.DBforMySQL/flexibleServers/databases",
       "apiVersion": "2021-12-01-preview",
-      "name": "[concat(parameters('mysqlServerName'), parameters('mysqlDatabaseName'))]",
+      "name": "[concat(parameters('mysqlServerName'), '/', parameters('mysqlDatabaseName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.DBforMySQL/flexibleServers', parameters('mysqlServerName'))]"
       ],
@@ -74,7 +74,7 @@
     {
       "type": "Microsoft.DBforMySQL/flexibleServers/firewallRules",
       "apiVersion": "2021-12-01-preview",
-      "name": "[concat(parameters('mysqlServerName'), parameters('mysqlDatabaseName'))]",
+      "name": "[concat(parameters('mysqlServerName'), '/', parameters('mysqlDatabaseName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.DBforMySQL/flexibleServers', parameters('mysqlServerName'))]"
       ],
