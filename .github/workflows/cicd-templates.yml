@@ -169,7 +169,7 @@ jobs:
           az mysql flexible-server ad-admin create \
           --server-name ${{ steps.metadata.outputs.mysql_server_name }} \
           --display-name ${{ steps.aad_app_display_name.outputs.value }} \
-          --object-id ${{ steps.identity.outputs.client_id }} \
+          --object-id ${{ secrets.AZURE_CLIENT_ID }} \
           --identity ${{ steps.identity.outputs.resource_id }}
 
       - name: Create MySQL User
