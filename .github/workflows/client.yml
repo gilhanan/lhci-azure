@@ -171,7 +171,8 @@ jobs:
           echo "value=$key" >> $GITHUB_OUTPUT
 
       - name: Create Azure File Share
-        run: az storage share create \
+        run: |
+          az storage share create \
           --name ${{ steps.job_metadata.outputs.file_share_name }} \
           --account-name ${{ steps.job_metadata.outputs.storage_name }} \
           --account-key ${{ steps.storage_account_key.outputs.value }}
