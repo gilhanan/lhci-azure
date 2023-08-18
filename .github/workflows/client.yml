@@ -43,30 +43,53 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Create Resource Group
-        run: az group create -n ${{ steps.metadata.outputs.resource_group }} -l "${{ env.LOCATION }}"
+        run: |
+          az group create \
+          --name ${{ steps.metadata.outputs.resource_group }} \
+          --location "${{ env.LOCATION }}"
 
       - name: Default Resource Group
         run: az config set defaults.group=${{ steps.metadata.outputs.resource_group }}
 
       - name: Create Azure Key Vault
+        id: keyvault
         run: |
-          exists=$(az keyvault show --name ${{ steps.metadata.outputs.keyvault_name }} --query name -o tsv | wc -l)
-          if [ $exists -eq 0 ]; then
-            az keyvault create --name ${{ steps.metadata.outputs.keyvault_name }} --enable-rbac-authorization true
-          fi
+          id=$(az keyvault show \
+          --name ${{ steps.metadata.outputs.keyvault_name }} \
+          --query id \
+          --output tsv)
 
-      - name: Assign Key Vault Secrets Officer role to the Azure Active Directory Application
+          if [ -z "$id" ]; then
+            az keyvault create \
+            --name ${{ steps.metadata.outputs.keyvault_name }} \
+            --enable-rbac-authorization true
+            
+            id=$(az keyvault show \
+            --name ${{ steps.metadata.outputs.keyvault_name }} \
+            --query id \
+            --output tsv)
+          fi
+          echo "id=$id" >> $GITHUB_OUTPUT
+
+      - name: Assign Key Vault Secrets Officer role to the AAD Application
         run: |
           az role assignment create \
           --assignee ${{ steps.metadata.outputs.client_id }} \
-          --scope $(az keyvault show --name ${{ steps.metadata.outputs.keyvault_name }} --query id --output tsv) \
+          --scope ${{ steps.keyvault.outputs.id }} \
           --role "Key Vault Secrets Officer"
 
       - name: Create ACR
-        run: az acr create -n ${{ steps.metadata.outputs.registry_name }} --sku Basic --admin-enabled true
+        run: |
+          az acr create \
+          --name ${{ steps.metadata.outputs.registry_name }} \
+          --sku Basic \
+          --admin-enabled true
 
       - name: Create Azure Storage Account
-        run: az storage account create -n ${{ steps.metadata.outputs.storage_name }}  --sku Standard_LRS
+        run: |
+          az storage account create \
+          --name ${{ steps.metadata.outputs.storage_name }} \
+          --sku Standard_LRS
 
   build-client:
     needs: [setup]
@@ -92,10 +115,14 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Login to ACR
-        run: az acr login -n ${{ steps.metadata.outputs.registry_name }}
+        run: az acr login --name ${{ steps.metadata.outputs.registry_name }}
 
       - name: Build and Push Docker image to ACR
-        run: az acr build -r ${{ steps.metadata.outputs.registry_name }} -t ${{ steps.metadata.outputs.full_image_name }} ./client
+        run: |
+          az acr build \
+          -registry ${{ steps.metadata.outputs.registry_name }} \
+          --image ${{ steps.metadata.outputs.full_image_name }} \
+          ./client
 
   deploy-client:
     runs-on: ubuntu-latest
@@ -103,7 +130,7 @@ jobs:
     env:
       LOCATION: "Central US"
       HOST: "https://smp-euap-pb-cus.azurewebsites.net"
-      TOKEN: "5ff1c161-a717-47db-834a-c9a3931ee3da"
+      LHCI_SERVER_TOKEN: "CANARY-REGION-BUILD-TOKEN"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -151,27 +178,38 @@ jobs:
         run: az config set defaults.group=${{ steps.job_metadata.outputs.resource_group }}
 
       - name: Create User-assigned Managed Identity
-        run: az identity create -n ${{ steps.job_metadata.outputs.identity_name }}
+        run: az identity create --name ${{ steps.job_metadata.outputs.identity_name }}
 
       - name: Retrieve the Managed Identity IDs
         id: identity
         run: |
-          identity_output=$(az identity show -n ${{ steps.job_metadata.outputs.identity_name }} -o json)
-          echo "principal_id=$(echo $identity_output | jq -r '.principalId')" >> $GITHUB_OUTPUT
-          echo "client_id=$(echo $identity_output | jq -r '.clientId')" >> $GITHUB_OUTPUT
-          echo "resource_id=$(echo $identity_output | jq -r '.id')" >> $GITHUB_OUTPUT
+          identity=$(az identity show \
+          --name ${{ steps.job_metadata.outputs.identity_name }} \
+          --output json)
+
+          echo "principal_id=$(echo $identity | jq -r '.principalId')" >> $GITHUB_OUTPUT
+          echo "client_id=$(echo $identity | jq -r '.clientId')" >> $GITHUB_OUTPUT
+          echo "resource_id=$(echo $identity | jq -r '.id')" >> $GITHUB_OUTPUT
 
       - name: Grant the Managed Identity permission to Pull from ACR
         run: |
+          scope=$(az acr show \
+          --name ${{ steps.job_metadata.outputs.registry_name }} \
+          --query id \
+          --output tsv)
+
           az role assignment create \
           --assignee ${{ steps.identity.outputs.principal_id }} \
-          --scope $(az acr show -n ${{ steps.job_metadata.outputs.registry_name }} --query id --output tsv) \
+          --scope $scope \
           --role "AcrPull"
 
       - name: Get Azure Storage Account Key
         id: storage_account_key
         run: |
-          key=$(az storage account keys list --account-name ${{ steps.job_metadata.outputs.storage_name }} --query '[0].value' --output tsv)
+          key=$(az storage account keys list \
+          --account-name ${{ steps.job_metadata.outputs.storage_name }} \
+          --query '[0].value' \
+          --output tsv)
           echo "value=$key" >> $GITHUB_OUTPUT
 
       - name: Create Azure File Share
@@ -209,7 +247,11 @@ jobs:
             for idx in "${!paths_queries[@]}"; do
               ci_name="${{ steps.job_metadata.outputs.ci_name }}-$idx"
 
-              status=$(az container show --name $ci_name --query instanceView.state --output tsv)
+              status=$(az container show \
+              --name $ci_name \
+              --query instanceView.state \
+              --output tsv)
+
               echo "Deployment status for $ci_name: $status"
 
               if [ "$status" == "Running" ]; then
@@ -234,6 +276,16 @@ jobs:
           --account-name ${{ steps.job_metadata.outputs.storage_name }} \
           --account-key ${{ steps.storage_account_key.outputs.value }}
 
+      - name: Get LHCI server token
+        id: lhci_server_token
+        run: |
+          token=$(az keyvault secret show \
+            --name ${{ env.LHCI_SERVER_TOKEN }} \
+            --vault-name ${{ steps.job_metadata.outputs.keyvault_name }} \
+            --query value \
+            --output tsv)
+          echo "value=$token" >> $GITHUB_ENV
+
       - name: Git metadata
         id: git_metadata
         run: |
@@ -247,16 +299,18 @@ jobs:
           echo "commit_message=${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
           echo "author=${{ github.event.head_commit.author.name }}" >> $GITHUB_OUTPUT
 
-      # - name: Upload Lighthouse reports to LHCI server
-      #   env:
-      #     LHCI_BUILD_CONTEXT__GIT_REMOTE: ${{ steps.git_metadata.outputs.git_remote }}
-      #     LHCI_BUILD_CONTEXT__GITHUB_REPO_SLUG: ${{ steps.git_metadata.outputs.github_repo_slug }}
-      #     LHCI_BUILD_CONTEXT__CURRENT_BRANCH: ${{ steps.git_metadata.outputs.current_branch }}
-      #     LHCI_BUILD_CONTEXT__CURRENT_HASH: ${{ steps.git_metadata.outputs.current_hash }}
-      #     LHCI_BUILD_CONTEXT__ANCESTOR_HASH: ${{ steps.git_metadata.outputs.ancestor_hash }}
-      #     LHCI_BUILD_CONTEXT__COMMIT_TIME: ${{ steps.git_metadata.outputs.commit_time }}
-      #     LHCI_BUILD_CONTEXT__COMMIT_MESSAGE: "${{ steps.git_metadata.outputs.commit_message}}"
-      #     LHCI_BUILD_CONTEXT__AUTHOR: "${{ steps.git_metadata.outputs.author}}"
-      #     LHCI_BUILD_CONTEXT__AVATAR_URL: "https://www.gravatar.com/avatar"
-      #   run: |
-      #     npx @lhci/cli@0.12.0 upload --serverBaseUrl=${{ steps.job_metadata.outputs.lhci_server_url }} --token=${{ env.TOKEN }}
+      - name: Upload Lighthouse reports to LHCI server
+        env:
+          LHCI_BUILD_CONTEXT__GIT_REMOTE: ${{ steps.git_metadata.outputs.git_remote }}
+          LHCI_BUILD_CONTEXT__GITHUB_REPO_SLUG: ${{ steps.git_metadata.outputs.github_repo_slug }}
+          LHCI_BUILD_CONTEXT__CURRENT_BRANCH: ${{ steps.git_metadata.outputs.current_branch }}
+          LHCI_BUILD_CONTEXT__CURRENT_HASH: ${{ steps.git_metadata.outputs.current_hash }}
+          LHCI_BUILD_CONTEXT__ANCESTOR_HASH: ${{ steps.git_metadata.outputs.ancestor_hash }}
+          LHCI_BUILD_CONTEXT__COMMIT_TIME: ${{ steps.git_metadata.outputs.commit_time }}
+          LHCI_BUILD_CONTEXT__COMMIT_MESSAGE: "${{ steps.git_metadata.outputs.commit_message}}"
+          LHCI_BUILD_CONTEXT__AUTHOR: "${{ steps.git_metadata.outputs.author}}"
+          LHCI_BUILD_CONTEXT__AVATAR_URL: "https://www.gravatar.com/avatar"
+        run: |
+          npx @lhci/cli@0.12.0 upload \
+          --serverBaseUrl=${{ steps.job_metadata.outputs.lhci_server_url }} \
+          --token=${{ steps.lhci_server_token.outputs.value }}
