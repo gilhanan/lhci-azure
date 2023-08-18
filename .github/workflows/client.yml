@@ -201,7 +201,7 @@ jobs:
 
       - name: Polling for deployment status
         run: |
-          paths_queries=($(jq -r '.collect.urls[]' config/config.json))
+          paths_queries=($(jq -r '.collect.urls[]' client/config/config.json))
           all_completed=0
 
           while [ $all_completed -eq 0 ]; do
