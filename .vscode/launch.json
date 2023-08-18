@@ -4,9 +4,10 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Start",
+      "name": "Start server",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run-script", "dev"]
+      "runtimeArgs": ["run-script", "dev"],
+      "cwd": "${workspaceFolder}/server"
     }
   ]
 }
