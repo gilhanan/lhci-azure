@@ -41,6 +41,7 @@
       "properties": {
         "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
         "httpsOnly": true,
+        "alwaysOn": true,
         "clientAffinityEnabled": false,
         "siteConfig": {
           "linuxFxVersion": "[concat('DOCKER|', parameters('dockerImage'))]",
