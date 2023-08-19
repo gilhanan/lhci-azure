@@ -41,8 +41,7 @@
             "azureFile": {
               "shareName": "[parameters('fileShareName')]",
               "readOnly": false,
-              "storageAccountName": "[parameters('storageAccountName')]",
-              "storageAccountKey": ""
+              "storageAccountName": "[parameters('storageAccountName')]"
             }
           }
         ],
