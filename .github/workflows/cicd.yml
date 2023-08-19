@@ -137,7 +137,7 @@ jobs:
           echo "full_image_name_url=$registry_name.azurecr.io/lhci/server:$image_tag" >> $GITHUB_OUTPUT
           echo "mysql_server_name=$server_app_name-db" >> $GITHUB_OUTPUT
           echo "identity_name=$server_app_name-identity" >> $GITHUB_OUTPUT
-          echo "webapp_name=$server_app_name-app" >> $GITHUB_OUTPUT
+          echo "webapp_name=$server_app_name" >> $GITHUB_OUTPUT
           echo "database_name=lhci-data" >> $GITHUB_OUTPUT
 
       - name: Log in to Azure
