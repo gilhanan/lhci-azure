@@ -178,6 +178,16 @@ jobs:
       - name: Default Resource Group
         run: az config set defaults.group=${{ steps.job_metadata.outputs.resource_group }}
 
+      - name: Get LHCI server token
+        id: lhci_server_token
+        run: |
+          token=$(az keyvault secret show \
+            --name ${{ env.LHCI_SERVER_TOKEN }} \
+            --vault-name ${{ steps.job_metadata.outputs.keyvault_name }} \
+            --query value \
+            --output tsv)
+          echo "value=$token" >> $GITHUB_OUTPUT
+
       - name: Create User-assigned Managed Identity
         run: az identity create --name ${{ steps.job_metadata.outputs.identity_name }}
 
@@ -277,16 +287,6 @@ jobs:
           --destination ./.lighthouseci \
           --source ${{ steps.job_metadata.outputs.file_share_name }} \
           --account-name ${{ steps.job_metadata.outputs.storage_name }}
-
-      - name: Get LHCI server token
-        id: lhci_server_token
-        run: |
-          token=$(az keyvault secret show \
-            --name ${{ env.LHCI_SERVER_TOKEN }} \
-            --vault-name ${{ steps.job_metadata.outputs.keyvault_name }} \
-            --query value \
-            --output tsv)
-          echo "value=$token" >> $GITHUB_OUTPUT
 
       - name: Git metadata
         id: git_metadata
