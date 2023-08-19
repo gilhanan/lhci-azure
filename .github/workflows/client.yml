@@ -222,16 +222,12 @@ jobs:
 
       - name: Grant the Container Instance Managed Identity permission to Storage File Data SMB
         run: |
-          scope=$(az storage share show \
-          --name ${{ steps.job_metadata.outputs.file_share_name }} \
-          --account-name ${{ steps.job_metadata.outputs.storage_name }} \
-          --query id \
-          --output tsv)
+          scope=/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ steps.job_metadata.outputs.resource_group }}/providers/Microsoft.Storage/storageAccounts/${{ steps.job_metadata.outputs.storage_name }}/fileServices/default/fileshares/${{ steps.job_metadata.outputs.file_share_name }}
 
           az role assignment create \
+          --role "Storage File Data SMB Share Contributor" \
           --assignee ${{ steps.identity.outputs.principal_id }} \
-          --scope $scope \
-          --role "Storage File Data SMB Share Contributor"
+          --scope $scope
 
       - name: Deploy Azure Container Instances
         run: |
