@@ -214,20 +214,21 @@ jobs:
           --scope $scope \
           --role "AcrPull"
 
+      - name: Get Azure Storage Account Key
+        id: storage_account_key
+        run: |
+          key=$(az storage account keys list \
+          --account-name ${{ steps.job_metadata.outputs.storage_name }} \
+          --query '[0].value' \
+          --output tsv)
+          echo "value=$key" >> $GITHUB_OUTPUT
+
       - name: Create Azure File Share
         run: |
           az storage share create \
           --name ${{ steps.job_metadata.outputs.file_share_name }} \
-          --account-name ${{ steps.job_metadata.outputs.storage_name }}
-
-      - name: Grant the Container Instance Managed Identity permission to Storage File Data SMB
-        run: |
-          scope=/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ steps.job_metadata.outputs.resource_group }}/providers/Microsoft.Storage/storageAccounts/${{ steps.job_metadata.outputs.storage_name }}/fileServices/default/fileshares/${{ steps.job_metadata.outputs.file_share_name }}
-
-          az role assignment create \
-          --role "Storage File Data SMB Share Contributor" \
-          --assignee ${{ steps.identity.outputs.principal_id }} \
-          --scope $scope
+          --account-name ${{ steps.job_metadata.outputs.storage_name }} \
+          --account-key ${{ steps.storage_account_key.outputs.value }}
 
       - name: Deploy Azure Container Instances
         run: |
@@ -240,6 +241,7 @@ jobs:
               registryHost=${{ steps.job_metadata.outputs.registry_host }} \
               fullImageName=${{ steps.job_metadata.outputs.full_image_name_url }} \
               storageAccountName=${{ steps.job_metadata.outputs.storage_name }} \
+              storageAccountKey=${{ steps.storage_account_key.outputs.value }} \
               fileShareName=${{ steps.job_metadata.outputs.file_share_name }} \
               ciName="${{ steps.job_metadata.outputs.ci_name }}-$idx" \
               HOST=${{ env.HOST }} \
@@ -282,7 +284,8 @@ jobs:
           az storage file download-batch \
           --destination ./.lighthouseci \
           --source ${{ steps.job_metadata.outputs.file_share_name }} \
-          --account-name ${{ steps.job_metadata.outputs.storage_name }}
+          --account-name ${{ steps.job_metadata.outputs.storage_name }} \
+          --account-key ${{ steps.storage_account_key.outputs.value }}
 
       - name: Git metadata
         id: git_metadata
