@@ -315,3 +315,13 @@ jobs:
           npx @lhci/cli@0.12.0 upload \
           --serverBaseUrl=${{ steps.job_metadata.outputs.lhci_server_url }} \
           --token=${{ steps.lhci_server_token.outputs.value }}
+
+      - name: Delete Azure Container Instances
+        run: |
+          paths_queries=($(jq -r '.collect.urls[]' client/config/config.json))
+          for idx in "${!paths_queries[@]}"; do
+            ci_name="${{ steps.job_metadata.outputs.ci_name }}-$idx"
+            az container delete \
+            --name $ci_name \
+            --yes
+          done
