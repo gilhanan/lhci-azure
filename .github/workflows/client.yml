@@ -175,19 +175,6 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Get LHCI server token
-        id: lhci_server_token_test
-        run: |
-          token=$(az keyvault secret show \
-            --name ${{ env.LHCI_SERVER_TOKEN }} \
-            --vault-name ${{ steps.job_metadata.outputs.keyvault_name }} \
-            --query value \
-            --output tsv)
-          echo "value=$token" >> $GITHUB_OUTPUT
-
-      - name: Print LHCI server token
-        run: echo ${{ steps.lhci_server_token_test.outputs.value }}
-
       - name: Default Resource Group
         run: az config set defaults.group=${{ steps.job_metadata.outputs.resource_group }}
 
