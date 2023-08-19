@@ -6,7 +6,6 @@
     "registryHost": { "type": "string" },
     "fullImageName": { "type": "string" },
     "storageAccountName": { "type": "string" },
-    "storageAccountKey": { "type": "securestring" },
     "fileShareName": { "type": "string" },
     "ciName": { "type": "string" },
     "HOST": { "type": "string" },
@@ -43,7 +42,7 @@
               "shareName": "[parameters('fileShareName')]",
               "readOnly": false,
               "storageAccountName": "[parameters('storageAccountName')]",
-              "storageAccountKey": "[parameters('storageAccountKey')]"
+              "storageAccountKey": ""
             }
           }
         ],
