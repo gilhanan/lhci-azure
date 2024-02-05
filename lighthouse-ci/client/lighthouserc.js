@@ -8,6 +8,9 @@ module.exports = {
         chromeFlags: "--no-sandbox --disable-dev-shm-usage",
       },
     },
+    assert: {
+      preset: "lighthouse:no-pwa",
+    },
     upload: {
       target: "lhci",
       serverBaseUrl: LHCI_SERVER,

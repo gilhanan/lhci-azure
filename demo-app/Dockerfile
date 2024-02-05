@@ -1,2 +1,5 @@
-FROM nginx
-COPY index.html /usr/share/nginx/html
+FROM node:18-bullseye-slim
+
+COPY . .
+
+CMD [ "node", "server.js" ]

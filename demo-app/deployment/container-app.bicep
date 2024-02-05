@@ -24,7 +24,7 @@ resource containerApp 'Microsoft.App/containerapps@2023-05-02-preview' = {
       activeRevisionsMode: 'multiple'
       ingress: {
         external: true
-        targetPort: 80
+        targetPort: 3000
         traffic: productionRevision == 'none' ? [
           {
             latestRevision: true
